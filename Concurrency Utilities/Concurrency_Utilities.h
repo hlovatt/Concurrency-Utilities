@@ -3,7 +3,7 @@
 //  Concurrency Utilities
 //
 //  Created by Howard Lovatt on 4/9/17.
-//  Copyright © 2017 RHJOD. All rights reserved.
+//  Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.
 //
 
 #import <Cocoa/Cocoa.h>
