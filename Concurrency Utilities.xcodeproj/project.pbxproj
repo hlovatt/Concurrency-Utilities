@@ -31,6 +31,7 @@
 		7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Concurrency_UtilitiesTests.swift; sourceTree = "<group>"; };
 		7678E2911F5D1B2500FE6D0B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7678E29B1F5D1DE500FE6D0B /* Atomic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Atomic.swift; sourceTree = "<group>"; };
+		7678E29D1F5D2CD500FE6D0B /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +56,7 @@
 		7678E2771F5D1B2500FE6D0B = {
 			isa = PBXGroup;
 			children = (
+				7678E29D1F5D2CD500FE6D0B /* README.md */,
 				7678E2831F5D1B2500FE6D0B /* Concurrency Utilities */,
 				7678E28E1F5D1B2500FE6D0B /* Concurrency UtilitiesTests */,
 				7678E2821F5D1B2500FE6D0B /* Products */,

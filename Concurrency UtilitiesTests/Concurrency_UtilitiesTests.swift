@@ -10,28 +10,34 @@ import XCTest
 @testable import Concurrency_Utilities
 
 class Concurrency_UtilitiesTests: XCTestCase {
-    func testGetSetUpdate() {
-        var test = Atomic((0, 0))
-        var error = Atomic(false)
-        for i in 0 ..< 10 {
+    func testAtomicGetSetUpdate() {
+        let test = Atomic((0, 0)) // Test that two parts of tuple always have same value.
+        let error = Atomic(false)
+        let group = DispatchGroup()
+        for i in 1 ... 10 {
+            group.enter()
             DispatchQueue.global().async {
+                defer { group.leave() }
                 test.value = (i, i)
             }
+            group.enter()
             DispatchQueue.global().async {
                 test.update {
-                    ($0.0 + 1, $0.1 + 1)
+                    defer { group.leave() }
+                    return ($0.0 + 1, $0.1 + 1)
                 }
             }
+            group.enter()
             DispatchQueue.global().async {
                 error.update {
-                    guard !$0 else {
-                        return true
-                    }
+                    defer { group.leave() }
+                    guard !$0 else { return true } // Don't over-write an existing error.
                     let t = test.value
-                    return t.0 != t.1
+                    return t.0 != t.1 // Test two parts of tuple have same value.
                 }
             }
         }
+        group.wait()
         XCTAssertFalse(error.value)
     }
 
