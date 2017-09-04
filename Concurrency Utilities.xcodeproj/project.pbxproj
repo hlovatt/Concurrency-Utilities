@@ -10,6 +10,7 @@
 		7678E28B1F5D1B2500FE6D0B /* Concurrency_Utilities.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */; };
 		7678E2901F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */; };
 		7678E2921F5D1B2500FE6D0B /* Concurrency_Utilities.h in Headers */ = {isa = PBXBuildFile; fileRef = 7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		7678E29C1F5D1DE500FE6D0B /* Atomic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E29B1F5D1DE500FE6D0B /* Atomic.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,6 +30,7 @@
 		7678E28A1F5D1B2500FE6D0B /* Concurrency UtilitiesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Concurrency UtilitiesTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Concurrency_UtilitiesTests.swift; sourceTree = "<group>"; };
 		7678E2911F5D1B2500FE6D0B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		7678E29B1F5D1DE500FE6D0B /* Atomic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Atomic.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -71,6 +73,7 @@
 		7678E2831F5D1B2500FE6D0B /* Concurrency Utilities */ = {
 			isa = PBXGroup;
 			children = (
+				7678E29B1F5D1DE500FE6D0B /* Atomic.swift */,
 				7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */,
 				7678E2851F5D1B2500FE6D0B /* Info.plist */,
 			);
@@ -148,6 +151,7 @@
 				TargetAttributes = {
 					7678E2801F5D1B2500FE6D0B = {
 						CreatedOnToolsVersion = 9.0;
+						LastSwiftMigration = 0900;
 						ProvisioningStyle = Automatic;
 					};
 					7678E2891F5D1B2500FE6D0B = {
@@ -196,6 +200,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7678E29C1F5D1DE500FE6D0B /* Atomic.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -333,6 +338,7 @@
 		7678E2961F5D1B2500FE6D0B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -348,6 +354,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.rhjod.Concurrency-Utilities";
 				PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)";
 				SKIP_INSTALL = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 4.0;
 			};
 			name = Debug;
@@ -355,6 +362,7 @@
 		7678E2971F5D1B2500FE6D0B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_IDENTITY = "";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -377,6 +385,7 @@
 		7678E2991F5D1B2500FE6D0B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = W37MFP57WS;
@@ -391,6 +400,7 @@
 		7678E29A1F5D1B2500FE6D0B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEVELOPMENT_TEAM = W37MFP57WS;
