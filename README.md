@@ -1,12 +1,15 @@
 #  Concurrency Utilities
 
-## Including in your project
-The easiest way is to clone this project from GitHub inside Xcode 9 and then drag the relevant swift files into your project. The files are only small so having a copy shouldn't be an issue. If you just want atomicity then you just need `Atomic.swift`, for futures `Future.swift` and `Atomic.swift`, and for reactive streams you need `ReactiveStream.swift`, `Future.swift`, and `Atomic.swift`.
+## Introduction
+A set of types and protocols that build from atomicity (`Atomic`) to futures (`Future`) to Reactive Streams. Futures are built on to of `Atomic` and Reactives Streams on top of futures. All three are useful when writing concurrent programs and the art of sucessfully writing concurrent programs is choosing the most suitable abstraction for the problem. When writing a new concurrent program it is suggested that you start with Reactive Streams, since these are the easiest to use, and only if there are problems consider the other abstractions.
+
+## Using in your project
+The easiest way to use these types and protocols in your own code is to clone this project from GitHub inside Xcode 9 and then drag the relevant swift files into your project. The files are only small so having a copy shouldn't be an issue (however you will need to manually update). If you just want atomicity then you just need `Atomic.swift`, for futures `Future.swift` *and* `Atomic.swift`, and for reactive streams you need `ReactiveStream.swift`, `Future.swift`, *and* `Atomic.swift`.
 
 ## Atomic
 Provides atomic access to a value; you can `get`, `set` and `update` the value. To update a value you supply a closure to `update` that accepts the old value and returns the new value; the `update` method also returns the new value from the closure. Calls to `get`, `set` and `update` can occur is any order and from any thread and are guaranteed not to expose partially updated values. Calls to `get`, `set` and `update` block until they have completed. Update can be used as a lock as well as providing atomicity, e.g.:
 
-    let lock = Atomic<Void>() // Atomic is a class and therefore can be a `let`; even though value updates.
+    let lock = Atomic<Void>()
     …
     // In thread 1
     lock.update {
@@ -21,6 +24,8 @@ Provides atomic access to a value; you can `get`, `set` and `update` the value. 
     }
 
 The threads will block until the other has finished because they are sharing `lock`.
+
+`Atomic` is a class and therefore instances would normally be declared using `let` (which can seem odd since they obviously mutate!).
 
 See `Concurreny_UtilitiesTests.swift` for examples.
 
@@ -60,7 +65,9 @@ A future may repressent a continually running background task and therefore have
     ...
     backgroundTask.cancel() // Background task runs until it is cancelled.
 
-Futures are classes and therefore would normally be declared using `let` and they are thread safe and therefore can be shared between threads.
+*It is intended that stream-flow operators are available that match those that go with the Reactive Flow classes, however currently the Swift 4 compiler can't infer the type, see bug report [SR-5853](https://bugs.swift.org/browse/SR-5838), and therefore these operators are not usable.* An overload for operator `~>` is provided for futures; this is particularly handy when working with Reactive Streams, see below. `future ~> &result` is equivalent to `result = future.get`. Overloads for `~>!` and `~>?` exist and do as expected; throws on `nil` and does nothing on `nil` respectively.
+
+Futures are classes and therefore instances would normally be declared using `let` (which might seem odd because they mutate) and they are also thread safe and therefore can be shared between threads.
 
 See `Concurreny_UtilitiesTests.swift` for examples.
 

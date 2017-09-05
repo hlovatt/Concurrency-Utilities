@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		760DB1601F5E5B2500C5F08E /* Future.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB15F1F5E5B2500C5F08E /* Future.swift */; };
 		7678E28B1F5D1B2500FE6D0B /* Concurrency_Utilities.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */; };
 		7678E2901F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */; };
 		7678E2921F5D1B2500FE6D0B /* Concurrency_Utilities.h in Headers */ = {isa = PBXBuildFile; fileRef = 7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -24,6 +25,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		760DB15F1F5E5B2500C5F08E /* Future.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Future.swift; sourceTree = "<group>"; };
 		766492EA1F5E070E00BAC14B /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
 		7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Concurrency_Utilities.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Concurrency_Utilities.h; sourceTree = "<group>"; };
@@ -78,6 +80,7 @@
 			isa = PBXGroup;
 			children = (
 				7678E29B1F5D1DE500FE6D0B /* Atomic.swift */,
+				760DB15F1F5E5B2500C5F08E /* Future.swift */,
 				7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */,
 				7678E2851F5D1B2500FE6D0B /* Info.plist */,
 			);
@@ -204,6 +207,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				760DB1601F5E5B2500C5F08E /* Future.swift in Sources */,
 				7678E29C1F5D1DE500FE6D0B /* Atomic.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
