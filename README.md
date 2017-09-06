@@ -104,7 +104,7 @@ and in Swift this becomes:
 
 This is similar to how Objective-C and C APIs are 'translated' when imported into Swift.
 
-On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. These implimentations are styled after the standard Swift collection library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceSubscriber` and the arguments when creating these classes mimic the arguments from `Sequence`, e.g. `ReduceSubscriber` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
+On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. These implementations are styled after the standard Swift collection library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceSubscriber` and the arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceSubscriber` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
 
 Subscribers, as well as conforming to `Subscribe`, also extend `Future` and are therefore a type of future (see above). The `get`, `cancel`, and `status` methods from `Future` behave as expected. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
 
@@ -119,7 +119,7 @@ Hello World using this library is:
     helloWorldPublisher ~> helloWorldSubscriber
     let helloWorldResult = helloWorldSubscriber.get ?? "Failed!"
 
-Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `~>` is evoccotive of the process that is occuring, and how future's `get` controls execution and error reporting.
+Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `~>` is evocative of the process that is occurring, and how future's `get` controls execution and error reporting.
 
 See `ReativeStreamTests.swift` for examples.
 
