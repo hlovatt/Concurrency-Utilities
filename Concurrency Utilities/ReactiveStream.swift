@@ -112,6 +112,7 @@ public protocol Subscriber {
     func on(subscribe: Subscription)
 }
 
+// Add flow syntax as an extension to `Subsriber` rather than `Publisher`, since the subscriber is returned and therefore the full type information, Self, is available for subsequent stages.
 public extension Subscriber {
     /// Subscribe to the publisher using stream flow syntax.
     /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol and worse the type checker seems to need it to be overridden (ensure body is `left.subscribe(right); return right`).

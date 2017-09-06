@@ -100,20 +100,21 @@ open class Future<T> {
     /// - note: In the case of this base class, cancel does nothing since this future is always cancelled.
     func cancel() {}
     
-    // Currently not working in Swift 4 because of type inference problems.
-    
     /// Operator to get the result from an asynchronuous execution in a stream like syntax; `left ~> right` is equivalent to `right = left.get`.
-    static func ~> <T>(left: Future<T>, right: inout T?) {
+    /// - note: Currently not working in Swift 4 because of type inference problems.
+    static func ~> (left: Future<T>, right: inout T?) {
         right = left.get
     }
     
     /// Operator to get and force unwrap the result from an asynchronuous execution in a stream like syntax; `left ~>! right` is equivalent to `right = left.get!`.
-    static func ~>! <T>(left: Future<T>, right: inout T) {
+    /// - note: Currently not working in Swift 4 because of type inference problems.
+    static func ~>! (left: Future<T>, right: inout T) {
         right = left.get!
     }
     
     /// Operator to get and ignore if `nil` the result from an asynchronuous execution in a stream like syntax; `left ~>!? right` is equivalent to `right = left.get?`.
-    static func ~>? <T>(left: Future<T>, right: inout T) {
+    /// - note: Currently not working in Swift 4 because of type inference problems.
+    static func ~>? (left: Future<T>, right: inout T) {
         if let left = left.get {
             right = left
         }
