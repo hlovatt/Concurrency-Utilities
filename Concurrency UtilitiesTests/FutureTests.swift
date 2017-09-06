@@ -1,5 +1,5 @@
 //
-//  Concurrency_UtilitiesTests.swift
+//  FutureTests.swift
 //  Concurrency UtilitiesTests
 //
 //  Created by Howard Lovatt on 4/9/17.
@@ -9,40 +9,7 @@
 import XCTest
 @testable import Concurrency_Utilities
 
-class Concurrency_UtilitiesTests: XCTestCase {
-    
-    // MARK: Atomic tests
-    
-    func testAtomicGetSetUpdate() {
-        let test = Atomic((0, 0)) // Test that two parts of tuple always have same value.
-        let error = Atomic(false)
-        let group = DispatchGroup()
-        for i in 1 ... 10 {
-            group.enter()
-            DispatchQueue.global().async {
-                defer { group.leave() }
-                test.value = (i, i)
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                test.update {
-                    defer { group.leave() }
-                    return ($0.0 + 1, $0.1 + 1)
-                }
-            }
-            group.enter()
-            DispatchQueue.global().async {
-                error.update {
-                    defer { group.leave() }
-                    guard !$0 else { return true } // Don't over-write an existing error.
-                    let t = test.value
-                    return t.0 != t.1 // Test two parts of tuple have same value.
-                }
-            }
-        }
-        group.wait()
-        XCTAssertFalse(error.value)
-    }
+class FutureTests: XCTestCase {
     
     // MARK: Thread tests
     
@@ -92,17 +59,17 @@ class Concurrency_UtilitiesTests: XCTestCase {
         switch s100ms.status {
         case .threw(let error):
             guard let e = error as? TerminateFuture else {
-                XCTAssert(false, "Should have timed out!")
+                XCTFail("Should have timed out!")
                 return
             }
             switch e {
             case .timedOut:
                 return // Expected result.
             default:
-                XCTAssert(false, "Should have timed out!")
+                XCTFail("Should have timed out!")
             }
         default:
-            XCTAssert(false, "Should have timed out!")
+            XCTFail("Should have timed out!")
         }
     }
     
@@ -113,17 +80,17 @@ class Concurrency_UtilitiesTests: XCTestCase {
         switch s100ms.status {
         case .threw(let error):
             guard let e = error as? TerminateFuture else {
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
                 return
             }
             switch e {
             case .cancelled:
                 return // Expected result.
             default:
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
             }
         default:
-            XCTAssert(false, "Should have cancelled!")
+            XCTFail("Should have cancelled!")
         }
     }
     
@@ -143,17 +110,17 @@ class Concurrency_UtilitiesTests: XCTestCase {
         switch s100ms.status {
         case .threw(let error):
             guard let e = error as? TerminateFuture else {
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
                 return
             }
             switch e {
             case .cancelled:
                 return // Expected result.
             default:
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
             }
         default:
-            XCTAssert(false, "Should have cancelled!")
+            XCTFail("Should have cancelled!")
         }
     }
     
@@ -167,7 +134,7 @@ class Concurrency_UtilitiesTests: XCTestCase {
         case .completed(_):
         return // Expected result.
         default:
-            XCTAssert(false, "Should have completed!")
+            XCTFail("Should have completed!")
         }
     }
     
@@ -179,17 +146,17 @@ class Concurrency_UtilitiesTests: XCTestCase {
         switch cancels.status {
         case .threw(let error):
             guard let e = error as? TerminateFuture else {
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
                 return
             }
             switch e {
             case .cancelled:
             return // Expected result.
             default:
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
             }
         default:
-            XCTAssert(false, "Should have cancelled!")
+            XCTFail("Should have cancelled!")
         }
     }
     
@@ -203,17 +170,17 @@ class Concurrency_UtilitiesTests: XCTestCase {
         switch f.status {
         case .threw(let error):
             guard let e = error as? TerminateFuture else {
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
                 return
             }
             switch e {
             case .cancelled:
             return // Expected result.
             default:
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
             }
         default:
-            XCTAssert(false, "Should have cancelled!")
+            XCTFail("Should have cancelled!")
         }
     }
     
@@ -227,17 +194,17 @@ class Concurrency_UtilitiesTests: XCTestCase {
         switch f.status {
         case .threw(let error):
             guard let e = error as? TerminateFuture else {
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
                 return
             }
             switch e {
             case .cancelled:
             return // Expected result.
             default:
-                XCTAssert(false, "Should have cancelled!")
+                XCTFail("Should have cancelled!")
             }
         default:
-            XCTAssert(false, "Should have cancelled!")
+            XCTFail("Should have cancelled!")
         }
     }
     
@@ -252,7 +219,7 @@ class Concurrency_UtilitiesTests: XCTestCase {
         case .completed(let result):
             XCTAssertTrue(result)
         default:
-            XCTAssert(false, "Should have completed!")
+            XCTFail("Should have completed!")
         }
     }
     

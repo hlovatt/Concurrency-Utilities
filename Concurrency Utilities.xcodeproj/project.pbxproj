@@ -8,8 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		760DB1601F5E5B2500C5F08E /* Future.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB15F1F5E5B2500C5F08E /* Future.swift */; };
+		760DB1621F5E917C00C5F08E /* ReactiveStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB1611F5E917C00C5F08E /* ReactiveStream.swift */; };
+		760DB1641F5E933D00C5F08E /* AtomicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB1631F5E933D00C5F08E /* AtomicTests.swift */; };
+		760DB1661F5E935B00C5F08E /* FutureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB1651F5E935B00C5F08E /* FutureTests.swift */; };
 		7678E28B1F5D1B2500FE6D0B /* Concurrency_Utilities.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */; };
-		7678E2901F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */; };
+		7678E2901F5D1B2500FE6D0B /* ReactiveStreamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E28F1F5D1B2500FE6D0B /* ReactiveStreamTests.swift */; };
 		7678E2921F5D1B2500FE6D0B /* Concurrency_Utilities.h in Headers */ = {isa = PBXBuildFile; fileRef = 7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		7678E29C1F5D1DE500FE6D0B /* Atomic.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E29B1F5D1DE500FE6D0B /* Atomic.swift */; };
 /* End PBXBuildFile section */
@@ -26,12 +29,15 @@
 
 /* Begin PBXFileReference section */
 		760DB15F1F5E5B2500C5F08E /* Future.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Future.swift; sourceTree = "<group>"; };
+		760DB1611F5E917C00C5F08E /* ReactiveStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactiveStream.swift; sourceTree = "<group>"; };
+		760DB1631F5E933D00C5F08E /* AtomicTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AtomicTests.swift; sourceTree = "<group>"; };
+		760DB1651F5E935B00C5F08E /* FutureTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FutureTests.swift; sourceTree = "<group>"; };
 		766492EA1F5E070E00BAC14B /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
 		7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Concurrency_Utilities.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Concurrency_Utilities.h; sourceTree = "<group>"; };
 		7678E2851F5D1B2500FE6D0B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7678E28A1F5D1B2500FE6D0B /* Concurrency UtilitiesTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Concurrency UtilitiesTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Concurrency_UtilitiesTests.swift; sourceTree = "<group>"; };
+		7678E28F1F5D1B2500FE6D0B /* ReactiveStreamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactiveStreamTests.swift; sourceTree = "<group>"; };
 		7678E2911F5D1B2500FE6D0B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		7678E29B1F5D1DE500FE6D0B /* Atomic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Atomic.swift; sourceTree = "<group>"; };
 		7678E29D1F5D2CD500FE6D0B /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -81,6 +87,7 @@
 			children = (
 				7678E29B1F5D1DE500FE6D0B /* Atomic.swift */,
 				760DB15F1F5E5B2500C5F08E /* Future.swift */,
+				760DB1611F5E917C00C5F08E /* ReactiveStream.swift */,
 				7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */,
 				7678E2851F5D1B2500FE6D0B /* Info.plist */,
 			);
@@ -90,7 +97,9 @@
 		7678E28E1F5D1B2500FE6D0B /* Concurrency UtilitiesTests */ = {
 			isa = PBXGroup;
 			children = (
-				7678E28F1F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift */,
+				760DB1631F5E933D00C5F08E /* AtomicTests.swift */,
+				760DB1651F5E935B00C5F08E /* FutureTests.swift */,
+				7678E28F1F5D1B2500FE6D0B /* ReactiveStreamTests.swift */,
 				7678E2911F5D1B2500FE6D0B /* Info.plist */,
 			);
 			path = "Concurrency UtilitiesTests";
@@ -209,6 +218,7 @@
 			files = (
 				760DB1601F5E5B2500C5F08E /* Future.swift in Sources */,
 				7678E29C1F5D1DE500FE6D0B /* Atomic.swift in Sources */,
+				760DB1621F5E917C00C5F08E /* ReactiveStream.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -216,7 +226,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7678E2901F5D1B2500FE6D0B /* Concurrency_UtilitiesTests.swift in Sources */,
+				760DB1641F5E933D00C5F08E /* AtomicTests.swift in Sources */,
+				7678E2901F5D1B2500FE6D0B /* ReactiveStreamTests.swift in Sources */,
+				760DB1661F5E935B00C5F08E /* FutureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
