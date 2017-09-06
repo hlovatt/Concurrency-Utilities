@@ -27,7 +27,7 @@ The threads will block until the other has finished because they are sharing `lo
 
 `Atomic` is a class and therefore instances would normally be declared using `let` (which can seem odd since they obviously mutate!).
 
-See `Concurreny_UtilitiesTests.swift` for examples.
+See `AtomicTests.swift` for examples.
 
 ## Futures
 A future allows control and monitoring of a background task that returns a value (though the value may be a `Void`, i.e. `()`). You obtain the value of a future using `get` (which will timeout), you cancel a future with `cancel`, and you can find out their status using `status` (which is primarily for debugging and is one of `.running`, `.completed(result: T)`, or `.thew(error: Error)`).
@@ -69,7 +69,7 @@ A future may be a continually running background task and therefore have no valu
 
 Futures are classes and therefore instances would normally be declared using `let` (which might seem odd because they mutate) and they are also thread safe and therefore can be shared between threads.
 
-See `Concurreny_UtilitiesTests.swift` for examples.
+See `FutureTests.swift` for examples.
 
 ## Reactive Streams
 Reactive Steams are a standardised way to transfer items between asynchronous tasks; they are widley supported in many languages and frameworks and therefore both general and detailed descriptions are available:
@@ -120,6 +120,8 @@ Hello World using this library is:
     let helloWorldResult = helloWorldSubscriber.get ?? "Failed!"
 
 Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `~>` is evoccotive of the process that is occuring, and how future's `get` controls execution and error reporting.
+
+See `ReativeStreamTests.swift` for examples.
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.
