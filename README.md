@@ -65,7 +65,7 @@ A future may be a continually running background task and therefore have no valu
     ...
     backgroundTask.cancel() // Background task runs until it is cancelled.
 
-*It is intended that stream-flow operators are available that match those that go with the Reactive Flow classes, below, however currently the Swift 4 compiler can't infer the type, see bug report [SR-5853](https://bugs.swift.org/browse/SR-5838), and therefore these operators are not usable.* An overload for operator `~>` is provided for futures; this is particularly handy when working with Reactive Streams, see below. `future ~> &result` is equivalent to `result = future.get`. Overloads for `~>!` and `~>?` exist and do as expected; throws on `nil` and does nothing on `nil` respectively.
+An custom operator `~~>` is provided for futures; this is particularly handy when working with Reactive Streams, see below. `future ~~> result` is equivalent to `result = future.get`. Additionally `~~>!` and `~~>?` exist and do as expected; throws on `nil` and does nothing on `nil` respectively. *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't (the correct construct is `future ~~> &result` - note `&`).*
 
 Futures are classes and therefore instances would normally be declared using `let` (which might seem odd because they mutate) and they are also thread safe and therefore can be shared between threads.
 
@@ -87,14 +87,14 @@ Reactive Streams are dynamic (can be reconfigured on the fly), can signal errors
   - *`Subscriber`:* Subscribe to a processor and recieve from the processor a subscripion, using this subscription the subscriber controls the flow of items from the producer to the subscriber.
   - *`Subscription`:* 'Contract' between a producer and subscriber for the supply of items, in particular the subscription regulates the rate of flow of items and signals completion, errors, and cancellation.
 
-The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, their methods, and the function the methods take are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). The implimentation in Swift of these protocols in this library faithfully follows the specification, but with Swift naming and type conventions rather than Java naming and type convensions, e.g. in Java you have:
+The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, their methods, and the function of the methods are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). The implimentation in Swift of these protocols in this library faithfully follows the specification, but with Swift naming and type conventions rather than Java naming and type convensions, e.g. in Java the standard specifies:
 
     interface Subscriber<T> {
         void onError(Throwable t);
         ...
     }
         
-and in Swift this becomes:
+and in this version for Swift (there is no Swift standard) this becomes:
         
     protocol Subscriber {
         associatedType SubscriberItem
@@ -114,12 +114,12 @@ Hello World using this library is:
 
     let helloWorldPublisher = ForEachPublisher(sequence: "Hello, world!".characters)
     let helloWorldSubscriber = ReduceSubscriber(into: "") { (result: inout String, next: Character) in
-        result.append(next) // Copy the string a character at a time.
+        result.append(next)
     }
-    helloWorldPublisher ~> helloWorldSubscriber
-    let helloWorldResult = helloWorldSubscriber.get ?? "Failed!"
+    var helloWorldResult = "Failed!"
+    helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
 
-Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `~>` is evocative of the process that is occurring, and how future's `get` controls execution and error reporting.
+Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
 
 See `ReativeStreamTests.swift` for examples.
 

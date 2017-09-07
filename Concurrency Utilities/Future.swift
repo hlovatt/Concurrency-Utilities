@@ -41,20 +41,15 @@ public enum FutureStatus<T> {
     case threw(error: Error)
 }
 
-/// Precedence group for stream operators.
-precedencegroup StreamPrecedence {
-    higherThan: AssignmentPrecedence
-    associativity: left
-}
-
 /// Operator for stream like flow.
-infix operator ~> : StreamPrecedence
+/// - note: Double tilde used because `~>` already defined in the standard library, but without associativity and therefore can't be chained.
+infix operator ~~> : MultiplicationPrecedence
 
 /// Operator for stream like flow that force unwraps an optional.
-infix operator ~>! : StreamPrecedence
+infix operator ~~>! : MultiplicationPrecedence
 
 /// Operator for streeam like flow that ignores a `nil` optional.
-infix operator ~>? : StreamPrecedence
+infix operator ~~>? : MultiplicationPrecedence
 
 /// An error that signals the future was terminated.
 public enum TerminateFuture: Error {
@@ -102,19 +97,19 @@ open class Future<T> {
     
     /// Operator to get the result from an asynchronuous execution in a stream like syntax; `left ~> right` is equivalent to `right = left.get`.
     /// - note: Currently not working in Swift 4 because of type inference problems.
-    static func ~> (left: Future<T>, right: inout T?) {
+    static func ~~> (left: Future<T>, right: inout T?) {
         right = left.get
     }
     
     /// Operator to get and force unwrap the result from an asynchronuous execution in a stream like syntax; `left ~>! right` is equivalent to `right = left.get!`.
     /// - note: Currently not working in Swift 4 because of type inference problems.
-    static func ~>! (left: Future<T>, right: inout T) {
+    static func ~~>! (left: Future<T>, right: inout T) {
         right = left.get!
     }
     
     /// Operator to get and ignore if `nil` the result from an asynchronuous execution in a stream like syntax; `left ~>!? right` is equivalent to `right = left.get?`.
     /// - note: Currently not working in Swift 4 because of type inference problems.
-    static func ~>? (left: Future<T>, right: inout T) {
+    static func ~~>? (left: Future<T>, right: inout T) {
         if let left = left.get {
             right = left
         }

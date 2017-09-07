@@ -9,26 +9,23 @@
 import XCTest
 @testable import Concurrency_Utilities
 
-/// Precedence group for stream operators.
-precedencegroup StreamPrecedence {
-    higherThan: AssignmentPrecedence
-    associativity: left
-}
-
-/// Operator for stream like flow.
-infix operator ~> : StreamPrecedence
 
 class ReactiveStreamTests: XCTestCase {
+    
+    // MARK: Examples
+    
     func testHelloWorld() {
         let test = "Hello, world!"
         let helloWorldPublisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
         let helloWorldSubscriber = ReduceSubscriber(into: "") { (result: inout String, character: Character) in
             result.append(character) // Copy the string a character at a time.
         }
-        helloWorldPublisher ~> helloWorldSubscriber
-        let helloWorldResult = helloWorldSubscriber.get ?? "Failed!"
+        var helloWorldResult = "Failed!"
+        helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
         XCTAssertEqual(test, helloWorldResult)
     }
+    
+    // MARK: Coverage tests
     
     func testReductionRefils() {
         let test = "Hello, world!"
@@ -36,7 +33,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(bufferSize: 1, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let result = subscriber.get ?? "Failed!"
         XCTAssertEqual(test, result)
     }
@@ -48,7 +45,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(into: "") { (_: inout String, _: Character) in
             throw SubscriberErrors.tooManySubscriptions(number: 0) // Fail by throwing (in example any old error!).
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let result = subscriber.get ?? error
         XCTAssertEqual(error, result)
     }
@@ -59,7 +56,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Allow time for cancel.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         subscriber.cancel()
         switch subscriber.status {
         case .threw(let error):
@@ -80,7 +77,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(timeout: .nanoseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let _ = subscriber.get
         switch subscriber.status {
         case .threw(let error):
@@ -101,7 +98,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(timeout: .microseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let _ = subscriber.get
         switch subscriber.status {
         case .threw(let error):
@@ -122,7 +119,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(timeout: .milliseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let _ = subscriber.get
         switch subscriber.status {
         case .threw(let error):
@@ -143,7 +140,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(timeout: .seconds(1), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let _ = subscriber.get
         switch subscriber.status {
         case .threw(let error):
@@ -165,7 +162,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(timeout: .never, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         XCTAssertEqual(test, subscriber.get ?? "Failed!")
     }
     
@@ -175,9 +172,9 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(timeout: .milliseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Allow time for multiple subscriptions.
         }
-        publisher ~> subscriber
-        publisher ~> subscriber // Subscribe a 2nd time - which should cause an error.
-        publisher ~> subscriber // Subscribe a 3rd time - which should do nothing.
+        publisher ~~> subscriber
+        publisher ~~> subscriber // Subscribe a 2nd time - which should cause an error.
+        publisher ~~> subscriber // Subscribe a 3rd time - which should do nothing.
         switch subscriber.status {
         case .threw(let error):
             switch error as! SubscriberErrors {
@@ -197,7 +194,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy string a character at a time.
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let _ = subscriber.get // Wait for completion.
         subscriber.cancel() // Should ignore cancel after completion.
         switch subscriber.status {
@@ -214,7 +211,7 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(into: "") { (_: inout String, _: Character) in
             throw SubscriberErrors.tooManySubscriptions(number: 0) // Fail by throwing (in example any old error!).
         }
-        publisher ~> subscriber
+        publisher ~~> subscriber
         let _ = subscriber.get
         switch subscriber.status {
         case .threw(let error):
@@ -236,7 +233,7 @@ class ReactiveStreamTests: XCTestCase {
             result.append(character) // Copy the string a character at a time.
         }
         let anySubscriber = AnySubscriber(subscriber) // Wrap in an AnySubscriber (to test AnySubscriber).
-        publisher ~> anySubscriber
+        publisher ~~> anySubscriber
         let result = subscriber.get ?? "Failed!"
         XCTAssertEqual(test, result)
     }
@@ -266,7 +263,7 @@ class ReactiveStreamTests: XCTestCase {
             }
         }
         let subscriber = N0Subscriber()
-        publisher ~> subscriber
+        publisher ~~> subscriber
         XCTAssertTrue(subscriber.isComplete)
     }
     
@@ -295,7 +292,7 @@ class ReactiveStreamTests: XCTestCase {
             }
         }
         let subscriber = NNegativeSubscriber()
-        publisher ~> subscriber
+        publisher ~~> subscriber
         XCTAssertTrue(subscriber.isError)
     }
     

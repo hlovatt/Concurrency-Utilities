@@ -21,7 +21,7 @@ class FutureTests: XCTestCase {
         })
     }
     
-    // MARK: Future tests
+    // MARK: Future Examples
 
     private func sleepUpTo100ms() -> Future<Void> {
         return AsynchronousFuture(timeout: .milliseconds(100)) {
@@ -31,6 +31,51 @@ class FutureTests: XCTestCase {
             }
         }
     }
+    
+    func testHelloWorld() {
+        let test = "Hello, world!"
+        let future = AsynchronousFuture { _ -> String in
+            self.sleepUpTo100ms().get // Long task!
+            return test
+        }
+        let result = future.get ?? "Failure!"
+        XCTAssertEqual(test, result)
+    }
+    
+    func testHelloWorldTildeTildeGreaterThan() {
+        let test = "Hello, world!"
+        let future = AsynchronousFuture { _ -> String in
+            self.sleepUpTo100ms().get // Long task!
+            return test
+        }
+        var result: String? = "Failure!"
+        future ~~> result
+        XCTAssertEqual(test, result)
+    }
+    
+    func testHelloWorldTildeTildeGreaterThanQuestion() {
+        let test = "Hello, world!"
+        let future = AsynchronousFuture { _ -> String in
+            self.sleepUpTo100ms().get // Long task!
+            return test
+        }
+        var result: String = "Failure!"
+        future ~~>? result
+        XCTAssertEqual(test, result)
+    }
+    
+    func testHelloWorldTildeTildeGreaterThanBang() {
+        let test = "Hello, world!"
+        let future = AsynchronousFuture { _ -> String in
+            self.sleepUpTo100ms().get // Long task!
+            return test
+        }
+        var result: String = "Failure!"
+        future ~~>! result
+        XCTAssertEqual(test, result)
+    }
+    
+    // MARK: Future coverage tests
     
     func testAsynchronuousFutureGet() {
         let completed = AsynchronousFuture { _ in

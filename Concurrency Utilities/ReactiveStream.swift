@@ -55,16 +55,6 @@ public protocol Publisher {
     //    static func ~> <S>(left: Self, right: S) -> S where S: Subscriber, S.SubscriberItem == PublisherItem
 }
 
-/// Add the definition for `~>` operator.
-//public extension Publisher {
-//    /// Subscribe to the publisher using stream flow syntax.
-//    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol and worse the type checker seems to need it to be overridden (ensure body is `left.subscribe(right); return right`).
-//    static func ~> <S>(left: Self, right: S) -> S where S: Subscriber, S.SubscriberItem == PublisherItem {
-//        left.subscribe(right)
-//        return right
-//    }
-//}
-
 /// `Subscriber` errors that the subscriber reports using its status (typically inherited from `Future`).
 enum SubscriberErrors: Error {
     /// Subscription request failed.
@@ -116,7 +106,7 @@ public protocol Subscriber {
 public extension Subscriber {
     /// Subscribe to the publisher using stream flow syntax.
     /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol and worse the type checker seems to need it to be overridden (ensure body is `left.subscribe(right); return right`).
-    @discardableResult static func ~> <P>(left: P, right: Self) -> Self where P: Publisher, P.PublisherItem == SubscriberItem {
+    @discardableResult static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.PublisherItem == SubscriberItem {
         left.subscribe(right)
         return right
     }
