@@ -72,22 +72,22 @@ Futures are classes and therefore instances would normally be declared using `le
 See `FutureTests.swift` for examples.
 
 ## Reactive Streams
-Reactive Steams are a standardised way to transfer items between asynchronous tasks; they are widley supported in many languages and frameworks and therefore both general and detailed descriptions are available:
+Reactive Steams are a standardised way to transfer items between asynchronous tasks; they are widely supported in many languages and frameworks and therefore both general and detailed descriptions are available:
 
   - [Manifesto](http://www.reactivemanifesto.org)
   - [Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification)
   - [Wiki](https://en.wikipedia.org/wiki/Reactive_Streams)
 
-Reactive Streams are dynamic (can be reconfigured on the fly), can signal errors, can be cancelled, and use pull requests to control the number of items transfered. The terminology used is:
+Reactive Streams are dynamic (can be reconfigured on the fly), can signal errors, can be cancelled, and use pull requests to control the number of items transferred. The terminology used is:
 
   - *Back pressure:* A subscriber controls the flow of items from a producer by requesting a number of items from the producer, if it stops requesting items then the producer must stop producing items (this is termed back pressure).
-  - *Item:* What is transfered from a producer, optionally via a processor, to a subscriber.
+  - *Item:* What is transferred from a producer, optionally via a processor, to a subscriber.
   - *`Processor`:* Represents a processing stage, which obtains items from an upstream producer, processes these items, and supplies the processed items to a downstream subscriber (i.e. a processor is both a producer, for downstream subscribers, and a subscriber to upstream producers).
   - *`Producer`:* Provider of a potentially unbounded number of sequenced items, producing them according to the demand received from its subscriber(s).
-  - *`Subscriber`:* Subscribe to a processor and recieve from the processor a subscripion, using this subscription the subscriber controls the flow of items from the producer to the subscriber.
+  - *`Subscriber`:* Subscribe to a processor and receive from the processor a subscription, using this subscription the subscriber controls the flow of items from the producer to the subscriber.
   - *`Subscription`:* 'Contract' between a producer and subscriber for the supply of items, in particular the subscription regulates the rate of flow of items and signals completion, errors, and cancellation.
 
-The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, their methods, and the function of the methods are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). The implimentation in Swift of these protocols in this library faithfully follows the specification, but with Swift naming and type conventions rather than Java naming and type convensions, e.g. in Java the standard specifies:
+The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, their methods, and the function of the methods are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). The implementation in Swift of these protocols in this library faithfully follows the specification, but with Swift naming and type conventions rather than Java naming and type conventions, e.g. in Java the standard specifies:
 
     interface Subscriber<T> {
         void onError(Throwable t);
@@ -108,7 +108,7 @@ On top of the specification's protocols the library provides implementations of 
 
 Subscribers, as well as conforming to `Subscribe`, also extend `Future` and are therefore a type of future (see above). The `get`, `cancel`, and `status` methods from `Future` behave as expected. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
 
-To simplify connecting producers, to processors, to subscribers the operator `~>` is defined, that is the Tilde (not Minus) followed by the Greater Than characters. This was chosen because the Tilde looks like an 's' on its side and the operator establishes a subscription, because the Tilde is wavey and therefore represnents who the flow of items adjusts dynamically, and the Greater Than indicates the direction of flow.
+To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined, that is the Tilde (not Minus) followed by the Greater Than characters. This was chosen because the Tilde looks like an 's' on its side and the operator establishes a subscription, because the Tilde is wavy and therefore represents who the flow of items adjusts dynamically, and the Greater Than indicates the direction of flow.
 
 Hello World using this library is:
 
