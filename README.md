@@ -42,7 +42,7 @@ The futures frameworks also includes an extension on `Thread` to allow easy runn
     func updateUI(_ s1: String, _ s2: String) { ... }
     ...
     let cancellableUIAction = AsynchronousFuture { isTerminated -> Void in
-        let future1 = getFromWeb(url: address1) // These two lines run concurrently.
+        let future1 = getFromWeb(url: address1) // These two lines run in parallel (if > 1 core).
         let future2 = getFromWeb(url: address2)
         let s1 = future1.get ?? defaultS1 // `get` returns `nil` on error/timeout/cancel, hence default.
         let s2 = future2.get ?? defaultS2
@@ -53,6 +53,32 @@ The futures frameworks also includes an extension on `Thread` to allow easy runn
     }
     ...
     cancellableUIAction.cancel() // Wired to cancel button on UI.
+
+An existing API that uses a completion handler (common in Cocoa) can easitly be converted into using a `Future`. Suppose in the above example `getFromWeb` was written using a completion handler:
+
+    func getFromWeb(url: URL, completion: (_ result: String?, _ error: Error?) -> Void) { ... }
+
+Then this can easily be converted into a `Future`:
+
+    func getFromWeb(url: URL) -> Future<String> {
+        return AsynchronousFuture { () -> (String?, Error?) in
+            var resultError: (String?, Error?)
+            getFromWeb(url: url) { // Call the original completion handler version.
+                resultError = ($0, $1) // Store its result.
+            }
+            return resultError
+        }
+    }
+
+A further feature of `Future`s is that they only timeout when get is called. A design pattern used with futures is the completable future, this is accomplished using `Future` via a zero timeout. A completable future lets you override the result if the future hasn't completed regardless of how long it has had to complete. A typical use case might be:
+
+    let f = AsyncronousFuture(timeout: .seconds(0)) { isTerminated -> String in // Note zero timeout.
+        // Get or calculate text.
+    }
+    // Stuff that would take some time goes here.
+    let s = f.get ?? defaultText // Because timeout is zero `get` never waits.
+
+The above is a completable future because `get` returns instantly with either `nil` if the future hasn't completed or if the future threw or with the value if the future completed, therefore without waiting you recieve either the completed value or the default (i.e. a completable future).
 
 A future may be a continually running background task and therefore have no value; in which case `get` would not be called and hence timeout would be ignored, it can however still be cancelled. EG:
 
