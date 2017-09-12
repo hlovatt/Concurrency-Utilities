@@ -33,9 +33,47 @@ class ReactiveStreamTests: XCTestCase {
         let subscriber = ReduceSubscriber(bufferSize: 1, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
-        publisher ~~> subscriber
-        let result = subscriber.get ?? "Failed!"
+        var result = "Failed!"
+        publisher ~~> subscriber ~~>? result
         XCTAssertEqual(test, result)
+    }
+    
+    func testOneIterationSequenceWithRefilAndFinishAtBufferBoundary() {
+        struct Test: Sequence, IteratorProtocol {
+            var count = 0
+            mutating func next() -> Int? {
+                defer { count += 1 }
+                if count < 8 { return count }
+                if count == 8 { return nil }
+                fatalError("Can only iterate once.")  // Error if `next` called 9th time!
+            }
+        }
+        let publisher = ForEachPublisher(sequence: Test())
+        let subscriber = ReduceSubscriber(bufferSize: 4, into: "") { (result: inout String, next: Int) in
+            result.append(next.description)
+        }
+        var result = "Failed!"
+        publisher ~~> subscriber ~~>? result
+        XCTAssertEqual("01234567", result)
+    }
+    
+    func testOneIterationSequenceWithFinishAtRefill() {
+        struct Test: Sequence, IteratorProtocol {
+            var count = 0
+            mutating func next() -> Int? {
+                defer { count += 1 }
+                if count < 8 { return count }
+                if count == 8 { return nil }
+                fatalError("Can only iterate once.")  // Error if `next` called 9th time!
+            }
+        }
+        let publisher = ForEachPublisher(sequence: Test())
+        let subscriber = ReduceSubscriber(bufferSize: 9, into: "") { (result: inout String, next: Int) in
+            result.append(next.description)
+        }
+        var result = "Failed!"
+        publisher ~~> subscriber ~~>? result
+        XCTAssertEqual("01234567", result)
     }
     
     func testReductionFails() {

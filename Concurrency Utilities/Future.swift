@@ -62,8 +62,12 @@ public enum TerminateFuture: Error {
 
 /// Base class for futures; acts like a future that was cancelled, i.e. no result and threw `CancelFuture.cancelled`.
 /// - note:
-///   - You would normally program to `Future`, not one of its derived classes, i.e. arguments, return types, properties, etc. typed as `Future`.
+///   - You would normally program to `Future`, *not* one of its derived classes, i.e. arguments, return types, properties, etc. typed as `Future`.
 ///   - This class is useful in its own right; not just a base class, but as a future that is known to be cancelled.
+///   - In the case of this, cancelled, base class:
+///     - `status` is `.threw(error: CancelFuture.cancelled)`.
+///     - `get` returns `nil`.
+///     - `cancel` does nothing.
 open class Future<T> {
     /// The current state of execution of the future.
     /// - note:
@@ -71,7 +75,6 @@ open class Future<T> {
     ///   - This status lag is due to the underlying thread system provided by the operating system that typically does not allow a running thread to be terminated.
     ///   - Because status can lag cancel and timeout; prefer get over status, for obtaining the result of a future and if detailed reasons for a failure are not required.
     ///   - Status however offers detailed information if a thread terminates by throwing (including cancellation and timeout) and is therefore very useful for debugging.
-    /// - note: In the case of this base class, always cancelled; returns `.threw(error: CancelFuture.cancelled)`.
     var status: FutureStatus<T> {
         return .threw(error: TerminateFuture.cancelled)
     }
@@ -81,7 +84,6 @@ open class Future<T> {
     /// - note:
     ///   - Timeout is only checked when `get` is called.
     ///   - If a future is cancelled or times out then get will subsequently return nil; however it might take some time before status reflects this calculation because status is only updated when the calculation stops.
-    /// - note: In the case of this base class, always return nil.
     var get: T? {
         return nil
     }
@@ -92,23 +94,22 @@ open class Future<T> {
     ///   - Cancellation is automatically checked on entry and exit to the calculation and therefore status will update before and after execution even if the calculation ignores its argument.
     ///   - Cancellation will not be instantaneous and therefore the future's status will not update immediately; it updates when the calculation terminates (either by returning a value or via a throw).
     ///   - If a future is cancelled subsequent calls to `get` will return nil; even if the calculation is still running and hence status has not updated.
-    /// - note: In the case of this base class, cancel does nothing since this future is always cancelled.
     func cancel() {}
     
     /// Operator to get the result from an asynchronuous execution in a stream like syntax; `left ~> right` is equivalent to `right = left.get`.
-    /// - note: Currently not working in Swift 4 because of type inference problems.
+    /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~> result` (the correct construct is `future ~~> &result` - note `&`).*
     static func ~~> (left: Future<T>, right: inout T?) {
         right = left.get
     }
     
     /// Operator to get and force unwrap the result from an asynchronuous execution in a stream like syntax; `left ~>! right` is equivalent to `right = left.get!`.
-    /// - note: Currently not working in Swift 4 because of type inference problems.
+    /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~>! result` (the correct construct is `future ~~>! &result` - note `&`).*
     static func ~~>! (left: Future<T>, right: inout T) {
         right = left.get!
     }
     
     /// Operator to get and ignore if `nil` the result from an asynchronuous execution in a stream like syntax; `left ~>!? right` is equivalent to `right = left.get?`.
-    /// - note: Currently not working in Swift 4 because of type inference problems.
+    /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~>? result` (the correct construct is `future ~~>? &result` - note `&`).*
     static func ~~>? (left: Future<T>, right: inout T) {
         if let left = left.get {
             right = left

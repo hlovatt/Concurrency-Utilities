@@ -108,7 +108,7 @@ On top of the specification's protocols the library provides implementations of 
 
 Subscribers, as well as conforming to `Subscribe`, also extend `Future` and are therefore a type of future (see above). The `get`, `cancel`, and `status` methods from `Future` behave as expected. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
 
-To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined, that is the Tilde (not Minus) followed by the Greater Than characters. This was chosen because the Tilde looks like an 's' on its side and the operator establishes a subscription, because the Tilde is wavy and therefore represents who the flow of items adjusts dynamically, and the Greater Than indicates the direction of flow.
+To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined; that is two tildes (not minus) followed by  greater-than. This was chosen because the tilde looks like an 's' on its side and the operator establishes a subscription, because the tilde is wavy and therefore represents dynamic flow, and because the greater-than indicates the direction of flow.
 
 Hello World using this library is:
 

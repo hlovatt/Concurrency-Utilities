@@ -20,7 +20,7 @@ import Foundation
 public protocol Processor: Subscriber, Publisher {}
 
 /// `Publisher` errors that the publisher reports using `Subscriber.on(error: Error)`, which is then typically reported via its status that is in turn typically from `Future`.
-enum PublisherErrors: Error {
+public enum PublisherErrors: Error {
     /// Subscription request failed.
     case subscriptionRejected(reason: String)
     
@@ -36,7 +36,7 @@ enum PublisherErrors: Error {
 /// A `Publisher` can serve multiple `Subscribers` subscribed by `subscribe(Subscriber)` dynamically at various points in time.
 public protocol Publisher {
     /// The type of items this `Publisher` produces.
-    associatedtype PublisherItem
+    associatedtype PublisherT
     
     /// Request this `Publisher` starts streaming items to the given `Subscriber`.
     ///
@@ -49,14 +49,11 @@ public protocol Publisher {
     /// If the `Publisher` rejects the subscription attempt or otherwise fails it will signal the error via `Subscriber.on(error: subscriptionRejected(reason: String))`.
     ///
     /// - parameter subscriber: The `Subscriber` that will consume items from this `Publisher`.
-    func subscribe<S>(_ subscriber: S) where S: Subscriber, S.SubscriberItem == PublisherItem
-    
-    //    // Stream flow operator for subscriptions.
-    //    static func ~> <S>(left: Self, right: S) -> S where S: Subscriber, S.SubscriberItem == PublisherItem
+    func subscribe<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == PublisherT
 }
 
 /// `Subscriber` errors that the subscriber reports using its status (typically inherited from `Future`).
-enum SubscriberErrors: Error {
+public enum SubscriberErrors: Error {
     /// Subscription request failed.
     case tooManySubscriptions(number: Int)
 }
@@ -73,7 +70,7 @@ enum SubscriberErrors: Error {
 /// Demand can be signaled via `Subscription.request(Int)` whenever the `Subscriber` instance is capable of handling more items.
 public protocol Subscriber {
     /// The type of the items consumed by this `Subscriber`.
-    associatedtype SubscriberItem
+    associatedtype SubscriberT
     
     /// Go into the successful terminal state (this method is called by the subscribed to `Producer` when it has no more items left to produce).
     ///
@@ -90,7 +87,7 @@ public protocol Subscriber {
     /// Supply next item produced by the `Publisher` in response to requests to `Subscription.request(Int)` (this method is called by the subscribed to `Publisher` for each of the items requested).
     ///
     /// - parameter next: The next item produced by the subscribed to `Producer`.
-    func on(next: SubscriberItem)
+    func on(next: SubscriberT)
     
     /// Invoked by the subscribed to `Publisher`, after this `Subscriber` has called `Publisher.subscribe(self)`.
     ///
@@ -106,27 +103,29 @@ public protocol Subscriber {
 public extension Subscriber {
     /// Subscribe to the publisher using stream flow syntax.
     /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol and worse the type checker seems to need it to be overridden (ensure body is `left.subscribe(right); return right`).
-    @discardableResult static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.PublisherItem == SubscriberItem {
+    @discardableResult public static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.PublisherT == SubscriberT {
         left.subscribe(right)
         return right
     }
 }
 
-/// Wrap any `Subscriber` in a `struct`, useful where `Subscriber` is needed as a type (it is a protocol).
+/// Wrap any `Subscriber` in a standard class, useful where `Subscriber` is needed as a type (it is a protocol).
 ///
-/// EG Implementations of `Subscription` typically contain a reference to the `Subscriber` they belong to and this reference is typed `AnySubscriber` because `Subscriber` cannot be used as a type because it has an associated type `SubscriberItem`.
-class AnySubscriber<T>: Subscriber {
-    typealias SubscriberItem = T
+/// EG Implementations of `Subscription` typically contain a reference to the `Subscriber` they belong to and this reference is typed `AnySubscriber` because `Subscriber` cannot be used as a type because it has an associated type `SubscriberT`.
+public class AnySubscriber<T>: Subscriber {
+    public typealias SubscriberT = T
     
-    let complete: () -> Void
+    private let complete: () -> Void
     
-    let error: (Error) -> Void
+    private let error: (Error) -> Void
     
-    let next: (T) -> Void
+    private let next: (T) -> Void
     
-    let subscribe: (Subscription) -> Void
+    private let subscribe: (Subscription) -> Void
     
-    init<S>(_ subscriber: S) where S: Subscriber, S.SubscriberItem == T {
+    /// Wrap the given subscriber, which can be any type of subscriber, so that the type becomes `AnySubscriber` regardless of the originating subscriber's specific type.
+    /// - parameter subscriber: The subscriber to wrap.
+    init<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == T {
         complete = {
             subscriber.onComplete()
         }
@@ -141,19 +140,19 @@ class AnySubscriber<T>: Subscriber {
         }
     }
     
-    func onComplete() {
+    public func onComplete() {
         self.complete()
     }
     
-    func on(error: Error) {
+    public func on(error: Error) {
         self.error(error)
     }
     
-    func on(next: T) {
+    public func on(next: T) {
         self.next(next)
     }
     
-    func on(subscribe: Subscription) {
+    public func on(subscribe: Subscription) {
         self.subscribe(subscribe)
     }
 }
@@ -186,38 +185,58 @@ public protocol Subscription {
 }
 
 /// Functions and properties that are useful in conjunction with Reactive Streams (inside an enum to give them their own namespace).
-enum ReactiveStreams {
+public enum ReactiveStreams {
     /// The suggested buffer size for `Publisher` or `Subscriber` buffering, that may be used in the absence of other constraints.
     ///
     /// - note: The current implementation has a default value is 256.
-    static let defaultBufferSize = 256
+    public static let defaultBufferSize = 256
 }
 
 // MARK: Explination text loosly based upon: http://download.java.net/java/jdk9/docs/api/java/util/concurrent/Flow.html.
 
-/// A `Publisher` usually defines its own `Subscription` implementation; constructing one in method `subscribe` and issuing it to the calling `Subscriber`.
-/// That way a publisher can trivially have multiple subscribers, since each subscriber has its own subscription.
-/// However; each subscriber has to nil out its reference to the subscription when it recieves either `on(error: Item)` or `onComplete()`, otherwise there will be a retain cycle memory leak.
-/// The publisher produces items in order and passes them to each subscriber asynchronously; normally this is achieved by each subscription having its own serial queue.
-/// For example, here is a publisher that produces (when requested) items from the given `Sequence` to its subscribers.
-/// Each subscriber recieves all of the sequence individually, i.e. each subscriber recieves the whole sequence (provided that the given sequence supports multiple traversal).
-/// This class does not use buffering, unlike many implementations, because buffering is handelled by the given sequence.
-/// The class ensures ordering of items produced using a serial queue inside its private subscription class.
-/// When a `ForEachPubliser` is created the given sequence is copied, therefore any changes to the sequence made after the publisher is created are *not* reflected in the items produced (the copy of the sequence is made at creation time not subscription time).
+/// Turns a `Sequence` into a `Publisher` by producing each item in the sequence in turn using the given sequences iterator; it is analaguous to a `for` loop or the `forEach` method.
+///
+/// - note:
+///   - Each subscriber recieves all of the sequence individually, i.e. each subscriber recieves the whole sequence (provided that the given sequence supports multiple traversal).
+///   - It is not thread safe to pass the returned subscription to a different thread, therefore do not pass a single subscriber to different threads (though different subscribers may be on different threads).
+///   - This class does not use buffering, unlike many implementations, because the buffer is the given sequence.
+///   - When a `ForEachPubliser` is created the given sequence is copied, therefore any changes to the sequence made after the publisher is created are *not* reflected in the items produced (the copy of the sequence is made at creation time not subscription time).
+///
+/// - note:
+///   - A `Publisher` usually defines its own `Subscription` implementation; constructing one in method `subscribe` and issuing it to the calling `Subscriber`.
+///   - That way a publisher can trivially have multiple subscribers, since each subscriber has its own subscription.
+///   - However; each subscriber has to nil out its reference to the subscription when it recieves either `on(error: Item)` or `onComplete()`, otherwise there will be a retain cycle memory leak.
+///   - The publisher produces items in order and passes them to each subscriber asynchronously; normally this is achieved by each subscription having its own serial queue.
+///
+/// - parameter T: The type of the items produced.
 public final class ForEachPublisher<T>: Publisher {
-    public typealias PublisherItem = T
+    /// The type of items produced.
+    public typealias PublisherT = T
     
-    private let sequence: AnySequence<T>
+    /// The sequence of items produced (one sequence per subsription assuming that the sequence can be traversed multiple times).
+    fileprivate let sequence: AnySequence<T>
     
-    private let qos: DispatchQoS
+    /// Quality of service for the dispatch queue used to sequence items and produce items in the background.
+    fileprivate let qos: DispatchQoS
     
-    public func subscribe<S>(_ subscriber: S) where S: Subscriber, S.SubscriberItem == T {
-        subscriber.on(subscribe: ForEachSubscription(AnySubscriber(subscriber), sequence.makeIterator(), qos))
+    /// This is a standard property of Reactive Stream types, in this case the property doesn't define the buffer size but rather the number of items produced before testing for subscription cancellation.
+    fileprivate let bufferSize: Int
+    
+    public func subscribe<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == T {
+        subscriber.on(subscribe: ForEachSubscription(self, AnySubscriber(subscriber)))
     }
     
-    init<S>(sequence: S, qos: DispatchQoS = DispatchQoS.default) where S: Sequence, S.SubSequence: Sequence, S.Iterator.Element == T, S.SubSequence.SubSequence == S.SubSequence, S.SubSequence.Iterator.Element == T {
+    /// A publisher whose subscription produce the given sequences items in the order the sequence's iterator provides them (the subscription closes when the iterator runs out of items).
+    /// - precondition: bufferSize > 0
+    /// - parameters:
+    ///   - sequence: The sequence of items produced (one sequence per subsription assuming that the sequence can be traversed multiple times).
+    ///   - qos: Quality of service for the dispatch queue used to sequence items and produce items in the background.
+    ///   - bufferSize: This is a standard argument to Reactive Stream types, in this case the argument doesn't define the buffer size but rather the number of items produced before testing for subscription cancellation.
+    public init<S>(sequence: S, qos: DispatchQoS = .default, bufferSize: Int = ReactiveStreams.defaultBufferSize) where S: Sequence, S.SubSequence: Sequence, S.Iterator.Element == T, S.SubSequence.SubSequence == S.SubSequence, S.SubSequence.Iterator.Element == T {
         self.sequence = AnySequence(sequence)
         self.qos = qos
+        precondition(bufferSize > 0, "bufferSize > 0: \(bufferSize)")
+        self.bufferSize = bufferSize
     }
 }
 
@@ -228,48 +247,66 @@ private final class ForEachSubscription<T>: Subscription {
     
     private let iterator: AnyIterator<T>
     
-    private var queue: DispatchQueue! = nil
+    private let bufferSize: Int
     
-    private var future: Future<Void>? = nil // Put the production within a `Future`, to allow cancellation.
+    private var queue: DispatchQueue! = nil // Force unwrapped because `queue` can't be initialised otherwise because `self` is used to generate a unique number and this is only possible if `queue` has a value (`nil`).
+    
+    private var producers = [Int : Future<Void>]() // Production requests are within a `Future`, to allow cancellation.
+    
+    private var producerNumber = 0 // The `index` for producers.
     
     private let isCompleted = Atomic(false) // Used to ensure thread safety (its the lock) and to mark when the `Publisher` has finished.
     
-    init(_ subscriber: AnySubscriber<T>, _ iterator: AnyIterator<T>, _ qos: DispatchQoS) {
+    init(_ publisher: ForEachPublisher<T>, _ subscriber: AnySubscriber<T>) {
         self.subscriber = subscriber
-        self.iterator = iterator
-        queue = DispatchQueue(label: "ForEachPublisher Serial Queue \(ObjectIdentifier(self))", qos: qos)
+        iterator = publisher.sequence.makeIterator()
+        bufferSize = publisher.bufferSize
+        queue = DispatchQueue(label: "ForEachPublisher Serial Queue \(ObjectIdentifier(self))", qos: publisher.qos)
     }
     
-    func request(_ n: Int) {
-        isCompleted.update { [weak self] completed -> Bool in // Capture self weakly, incase no longer required.
-            guard n != 0, !completed, let strongSelf = self else { // Guard against do nothing, already finished, and no self.
+    public func request(_ n: Int) {
+        isCompleted.update { completed -> Bool in
+            guard n != 0, !completed else { // Guard against do nothing and already finished.
                 if !completed {
-                    self?.subscriber.onComplete()
+                    self.subscriber.onComplete()
                 }
                 return true // Completed.
             }
-            if n < 0 {
-                strongSelf.subscriber.on(error: PublisherErrors.cannotProduceRequestedNumberOfItems(numberRequested: n, reason: "Negative number of items not allowed."))
+            guard n > 0 else { // Guard against -ve n.
+                self.subscriber.on(error: PublisherErrors.cannotProduceRequestedNumberOfItems(numberRequested: n, reason: "Negative number of items not allowed."))
                 return true // Mark subscription as completed.
             }
-            future = AsynchronousFuture(queue: strongSelf.queue) { _ throws -> Void in
+            let thisProducersNumber = producerNumber
+            let producer = AsynchronousFuture(queue: self.queue) { isTerminated throws -> Void in
                 var count = n
-                while count > 0, let item = strongSelf.iterator.next() {
-                    strongSelf.subscriber.on(next: item)
-                    count -= 1
+                while count > 0 {
+                    try isTerminated()
+                    let innerLimit = min(self.bufferSize, count)
+                    var innerCount = innerLimit
+                    while innerCount > 0, let item = self.iterator.next() {
+                        self.subscriber.on(next: item)
+                        innerCount -= 1
+                    }
+                    count = innerCount > 0 ? -1 : count - innerLimit
                 }
-                if count != 0 {
-                    strongSelf.subscriber.onComplete() // Tell subscriber that subscription is completed.
-                    strongSelf.isCompleted.value = true // Mark subscription as completed.
+                self.producers.removeValue(forKey: thisProducersNumber) // This producer has finished.
+                if count < 0 { // Complete?
+                    self.subscriber.onComplete() // Tell subscriber that subscription is completed.
+                    self.cancel() // Cancel remaining queued production and mark this subscription as complete.
                 }
             }
+            producers[thisProducersNumber] = producer
+            producerNumber += 1
             return false // Still going.
         }
     }
     
-    func cancel() {
-        isCompleted.update { [weak self] completed -> Bool in // Capture self weakly, incase no longer required.
-            self?.future?.cancel() // Cancel production of future items.
+    public func cancel() {
+        isCompleted.update { completed -> Bool in
+            for producer in self.producers.values {
+                producer.cancel() // Cancel item production from queued producer.
+            }
+            producers.removeAll()
             return true // Mark subscription as completed.
         }
     }
@@ -286,7 +323,7 @@ private final class ForEachSubscription<T>: Subscription {
 ///   - As with `AsynchronousFuture` the `init` of the subscriber returns without blocking and the future is in the running state and the timeout time has started.
 ///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
 ///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
-///   - `Subscriber`s are thread safe and can be shared between threads, like other `Future`s.
+///   - `Subscriber`s themselves are normally thread safe however their substriptions are nearly always not thread safe, therefore treat subscribers as not thread safe and do not pass between threads.
 public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     // MARK: Future properties and methods
     
@@ -298,23 +335,25 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
         return _status.value
     }
     
-    override var get: R? {
+    override public var get: R? {
         while true { // Keep looping until completed, cancelled, timed out, or throws.
-            switch _status.value { // Potentially wait for timeout.
+            switch _status.value {
             case .running:
                 let sleepInterval = min(timeoutTime.timeIntervalSinceNow, 0.25) // Limit sleep to 250 ms to remain responsive.
                 if sleepInterval > 0.01 { // Minimum time interval worth sleeping for is 10 ms.
                     Thread.sleep(forTimeInterval: sleepInterval)
-                } else {
-                    _status.update {
-                        switch $0 {
-                        case .running:
-                            return .threw(error: TerminateFuture.timedOut) // Timeout if still running.
-                        default:
-                            return $0 // Can't think how to test this!
-                        }
+                    break // Loop and check status again.
+                }
+                _status.update {
+                    switch $0 {
+                    case .running:
+                        subscription?.cancel() // Cancel the subscription, if there is one.
+                        subscription = nil // Free subscription's resources.
+                        return .threw(error: TerminateFuture.timedOut) // Timeout if still running.
+                    default:
+                        return $0 // Stay in present state if not running. Can't think how to test this line!
                     }
-            } // Loop and check status again.
+                } // Exit outer loop by checking status again.
             case .completed(let result):
                 return result
             case .threw(_):
@@ -323,7 +362,7 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
         }
     }
     
-    override func cancel() {
+    override public func cancel() {
         _status.update {
             switch $0 {
             case .running:
@@ -338,28 +377,29 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     
     // MARK: Subscriber properties and methods
     
-    public typealias SubscriberItem = T
+    public typealias SubscriberT = T
     
     private var result: R
     
-    private let updateAccumulatingResult: (inout R, T) throws -> ()
+    private let accumulatee: (inout R, T) throws -> ()
     
     private var subscription: Subscription?
     
     private let bufferSize: Int
     
-    private var countToRefill = 0 // The buffer is provided by the consumer, but the data transfer is still in chunks so that the system is responsive (in particular checks on cancellation, throws, and completion are made before and after a chunk of items are transfered).
+    private var countToRefill = 0
     
     public func on(subscribe: Subscription) {
         _status.update {
             switch $0 {
             case .running: // Only allow subscriptions if running.
                 guard subscription == nil else { // Only allow one subscription.
-                    subscription?.cancel() // Cancel the current subscription because of the error.
-                    return .threw(error: SubscriberErrors.tooManySubscriptions(number: 2)) // Error if already subscribed.
+                    subscription?.cancel() // Cancel the current subscription because of double subsciption error.
+                    return .threw(error: SubscriberErrors.tooManySubscriptions(number: 2))
                 }
-                countToRefill = bufferSize - bufferSize / 2 // Re-request when half consumed (half rounded up so that a buffer of 1 is OK).
-                subscribe.request(bufferSize) // Initially fill the buffer
+                countToRefill = bufferSize
+                subscribe.request(bufferSize) // Start subscription
+                subscribe.request(bufferSize) // Ensure that two lots of items are always in flight.
                 self.subscription = subscribe
                 return $0 // Still running.
             default:
@@ -370,12 +410,12 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     
     public func on(next: T) {
         countToRefill -= 1
-        if countToRefill <= 0 {
-            countToRefill = bufferSize - bufferSize / 2 // Re-request when half consumed (half rounded up so that a buffer of 1 is OK).
+        if countToRefill <= 0 { // Request more items when `bufferSize` items 'accumulated'.
+            countToRefill = bufferSize
             subscription?.request(countToRefill)
         }
         do {
-            try updateAccumulatingResult(&result, next) // The output buffer/accumulator is provided by `result`.
+            try accumulatee(&result, next) // The output buffer/accumulator is provided by `result`.
         } catch {
             subscription?.cancel()
             on(error: error)
@@ -408,9 +448,25 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     
     // MARK: init
     
-    /// - note: The default `timeout` is 1 second and the default buffer size is `ReactiveStreams.defaultBufferSize`.
+    /// A subscriber that takes items from its subscription and passes them to the given `updateAccumulatingResult` which combines them with the given `initialResult` and when finished returns via `get` the now modified `initialResult` (Reactive Stream version of `Sequence.reduce(into:_:)`).
+    /// - note: As is typical of subscribers this subscriber can have only one subscription at a time and it is not thread safe.
     /// - precondition: `bufferSize` must be > 0.
-    init(timeout: DispatchTimeInterval = .seconds(1), bufferSize: Int = ReactiveStreams.defaultBufferSize, into initialResult: R, updateAccumulatingResult: @escaping (inout R, T) throws -> ()) {
+    /// - parameters:
+    ///   - timeout: The time that `get` will wait before returning `nil` and seeting `status` to a timeout error (default 1 second).
+    ///   - bufferSize:
+    ///     The buffer for this subscriber is the given `initialResult` (which is typically a single value).
+    ///     Therefore this parameter is purely a tunning parameter to control the number of items requested at a time.
+    ///     As is typical of subscribers, this subscriber always requests lots of `bufferSize` items and initially requests two lots of items so that there is always two lots of items in flight.
+    ///     Tests for cancellation are only performed every `bufferSize` items, therefore there is a compromise between a large `bufferSize` to maximize throuput and a small `bufferSize` to maximise responsiveness.
+    ///     The default `bufferSize` is `ReactiveStreams.defaultBufferSize`.
+    ///   - into:
+    ///     The running accumulator that the given `updateAccumulatingResult` closure accumulates into.
+    ///     The given initial value is used to start the accumulation.
+    ///     When accumulation is finisged this value is returned via `get`.
+    ///   - updateAccumulatingResult: A closure that accepts the given `into` as an `inout` parameter and an item from a subscription and combines them into `into`.
+    ///   - accumulator: The rumming accumulator (this is the given `into` and is the value returned via `get`).
+    ///   - next: The next item to be accumulated.
+    public init(timeout: DispatchTimeInterval = .seconds(1), bufferSize: Int = ReactiveStreams.defaultBufferSize, into initialResult: R, updateAccumulatingResult: @escaping ( _ accumulator: inout R, _ next: T) throws -> ()) {
         switch timeout {
         case .nanoseconds(let ns):
             timeoutTime = Date(timeIntervalSinceNow: Double(ns) / Double(1_000_000_000))
@@ -426,6 +482,6 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
         precondition(bufferSize > 0, "Buffer size must be > 0, is \(bufferSize)") // Can't test a precondition.
         self.bufferSize = bufferSize
         result = initialResult
-        self.updateAccumulatingResult = updateAccumulatingResult
+        accumulatee = updateAccumulatingResult
     }
 }
