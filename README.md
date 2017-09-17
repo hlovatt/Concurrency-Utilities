@@ -4,10 +4,14 @@
 A set of types and protocols that build from atomicity (`Atomic`) to futures (`Future`) to Reactive Streams. Futures are built on to of `Atomic` and Reactives Streams on top of futures. All three are useful when writing concurrent programs and the art of sucessfully writing concurrent programs is choosing the most suitable abstraction for the problem. When writing a new concurrent program it is suggested that you start with Reactive Streams, since these are the easiest to use, and only if there are problems consider the other abstractions.
 
 ## Using in your project
-The easiest way to use these types and protocols in your own code is to clone this project from GitHub inside Xcode 9 and then drag the relevant swift files into your project. The files are only small so having a copy shouldn't be an issue (however you will need to manually update). If you just want atomicity then you just need `Atomic.swift`, for futures `Future.swift` *and* `Atomic.swift`, and for reactive streams you need `ReactiveStream.swift`, `Future.swift`, *and* `Atomic.swift`.
+The easiest way to use these types and protocols in your own code is to clone this project from GitHub inside Xcode 9 and then drag the relevant swift files into your project. The files are only small so having a copy shouldn't be an issue (however you will need to manually update). If you just want atomicity then you just need `Atomic.swift`, for futures `Future.swift` *and* `Atomic.swift`, and for reactive collections you need `ReactiveCollection.swift`, `ReactiveStream.swift`, `Future.swift`, *and* `Atomic.swift`.
+
+The file `ReactiveStream.swift` just contains the protocols etc. to define a Reactive Stream and can be used to build an implementation of Reactive Streams, one such implementation is `ReactiveCollection.swift`,
 
 ## Atomic
-Provides atomic access to a value; you can `get`, `set` and `update` the value. To update a value you supply a closure to `update` that accepts the old value and returns the new value; the `update` method also returns the new value from the closure. Calls to `get`, `set` and `update` can occur is any order and from any thread and are guaranteed not to expose partially updated values. Calls to `get`, `set` and `update` block until they have completed. Update can be used as a lock as well as providing atomicity, e.g.:
+Provides atomic access to a value; you can `get`, `set` and `update` the value. To update a value you supply a closure to `update` that accepts the old value and returns the new value; the `update` method also returns the new value from the closure. Calls to `get`, `set` and `update` can occur is any order and from any thread and are guaranteed not to expose partially updated values. Calls to `get`, `set` and `update` block until they have completed.
+
+Update can be used as a lock as well as providing atomicity, e.g.:
 
     let lock = Atomic<Void>()
     …
@@ -29,7 +33,7 @@ The threads will block until the other has finished because they are sharing `lo
 
 See `AtomicTests.swift` for examples.
 
-## Futures
+## Future
 A future allows control and monitoring of a background task that returns a value (though the value may be a `Void`, i.e. `()`). You obtain the value of a future using `get` (which will timeout), you cancel a future with `cancel`, and you can find out their status using `status` (which is primarily for debugging and is one of `.running`, `.completed(result: T)`, or `.thew(error: Error)`).
 
 You typically type function arguments and returns as `Future`, so that any of the more specific types of future can be supplied. Most commonly you create an `AsynchronousFuture` which is a future that evaluates asynchronously on a specified queue (defaults to global default queue which is concurrent) and with a specified timeout (defaults to 1 second). An `AsynchronousFuture` is given a closure to execute in the background that accepts a termination test argument (`try testTermination()`), can throw, and returns the future's value. `testTermination()` is automattically tested before and after the closure is run, but it is up to the programmer to test whilst the closure is running.
@@ -97,7 +101,7 @@ Futures are classes and therefore instances would normally be declared using `le
 
 See `FutureTests.swift` for examples.
 
-## Reactive Streams
+## Reactive Stream
 Reactive Steams are a standardised way to transfer items between asynchronous tasks; they are widely supported in many languages and frameworks and therefore both general and detailed descriptions are available:
 
   - [Manifesto](http://www.reactivemanifesto.org)
@@ -130,6 +134,7 @@ and in this version for Swift (there is no Swift standard) this becomes:
 
 This is similar to how Objective-C and C APIs are 'translated' when imported into Swift.
 
+## Reactive Collection
 On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. These implementations are styled after the standard Swift collection library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceSubscriber` and the arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceSubscriber` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
 
 Subscribers, as well as conforming to `Subscribe`, also extend `Future` and are therefore a type of future (see above). The `get`, `cancel`, and `status` methods from `Future` behave as expected. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
@@ -147,7 +152,9 @@ Hello World using this library is:
 
 Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
 
-See `ReativeStreamTests.swift` for examples.
+Typically you use the sequence like classes, `ForEachProducer`, `ReduceSubscriber`, etc., directly, however base classes are provided for simplifying writing your own Reactive Stream implementations: `IteratingPublisher` , `AccumulatingSubscriber`, etc.
+
+See `ReativeCollectionTests.swift` for examples.
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.

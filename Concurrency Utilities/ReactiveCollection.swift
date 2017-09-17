@@ -172,19 +172,19 @@ public final class ForEachPublisher<T>: IteratingPublisher<T> {
     }
 }
 
+/// A `Subscriber` that is also a `Future` that takes items from its subscription and passes them to its `accumulatee` method which processes each item and when completed the result is obtained from property `accumulator` and returned via `get` and/or `status`.
+/// - warning: Both `accumulatee` and `accumulator` must be overriden (the default implementations throw a fatal error).
 /// - note:
-///   - A `Subscriber` arranges that items be produced and processes the items it is supplied.
-///   - Items (invocations on `Subscriber.on(next: T)`) are not produced unless requested, but multiple items are typically requested (`Subscription.request(Int)`).
-///   - Many `Subscriber` implementations can arrange this in the style of the following example, where a buffer is used to allow for more efficient overlapped processing with less communication than if individual items are processed.
-///   - Instead of subscribers supporting multiple subscriptions; it is easier to instead define multiple `Subscriber`s each with its own `Subscription`.
-///   - Care needs to be taken, in a thread safe way (e.g. use `Future`'s status atomically), to ensure that there is only ever one subscription at a time.
-///   - Typically `Subscribers` are also `Futures`, so that they can be cancelled and so that they can timeout.
-///   - As with all `Future`s, timeout is only invoked when `get` is called (which will block until completion, cancellation, timeout, or throws occurs) and if `get` is not called then the subscriber continues until it is cancelled or completed (i.e. no timeout).
-///   - As with `AsynchronousFuture` the `init` of the subscriber returns without blocking and the future is in the running state and the timeout time has started.
+///   - `Subscriber`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///   - As all `Subscriber`s that also `Future`s this subscriber can have only one subscription in its liefetime since a future can only complete once.
+///   - Since the subscriber is also a future it can be cancelled or timeout, both of which in turn cancells its subscription.
 ///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
 ///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
-///   - `Subscriber`s themselves are normally thread safe however their subscriptions are nearly always not thread safe, therefore treat subscribers as not thread safe and do not pass between threads.
-public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
+/// - parameters:
+///   - T: The type of the elements subscribed to.
+///   - R: The result type of the accumulation.
+open class AccumulatingSubscriber<T, R>: Future<R>, Subscriber {
+    
     // MARK: Future properties and methods
     
     private let _status = Atomic(FutureStatus<R>.running) // Set in background, read in foreground.
@@ -239,10 +239,6 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     
     public typealias SubscriberT = T
     
-    private var result: R
-    
-    private let accumulatee: (inout R, T) throws -> ()
-    
     private var subscription: Subscription?
     
     private let bufferSize: Int
@@ -275,7 +271,7 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
             subscription?.request(countToRefill)
         }
         do {
-            try accumulatee(&result, next) // The output buffer/accumulator is provided by `result`.
+            try accumulatee(next: next) // The output buffer/accumulator is provided by `result`.
         } catch {
             subscription?.cancel()
             on(error: error)
@@ -299,7 +295,7 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
             switch $0 {
             case .running:
                 subscription = nil // Free subscription's resources.
-                return .completed(result: result)
+                return .completed(result: accumulator)
             default:
                 return $0 // Do nothing - already finished.
             }
@@ -308,8 +304,60 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     
     // MARK: init
     
-    /// A subscriber that takes items from its subscription and passes them to the given `updateAccumulatingResult` which combines them with the given `initialResult` and when finished returns via `get` the now modified `initialResult` (Reactive Stream version of `Sequence.reduce(into:_:)`).
-    /// - note: As is typical of subscribers this subscriber can have only one subscription at a time and it is not thread safe.
+    /// A `Subscriber` that is also a `Future` that takes items from its subscription and passes them to its `accumulatee` method which processes each item and when completed the result is obtained from property `accumulator` and returned via `get` and/or `status`.
+    /// - precondition: `bufferSize` must be > 0.
+    /// - parameters:
+    ///   - timeout: The time that `get` will wait before returning `nil` and setting `status` to a timeout error (default `Futures.defaultTimeout`).
+    ///   - bufferSize:
+    ///     The buffer for this subscriber is the given `initialResult` (which is typically a single value).
+    ///     Therefore this parameter is purely a tuning parameter to control the number of items requested at a time.
+    ///     As is typical of subscribers, this subscriber always requests lots of `bufferSize` items and initially requests two lots of items so that there is always two lots of items in flight.
+    ///     Tests for cancellation are only performed every `bufferSize` items, therefore there is a compromise between a large `bufferSize` to maximize throughput and a small `bufferSize` to maximise responsiveness.
+    ///     The default `bufferSize` is `ReactiveStreams.defaultBufferSize`.
+    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: Int = ReactiveStreams.defaultBufferSize) {
+        switch timeout {
+        case .nanoseconds(let ns):
+            timeoutTime = Date(timeIntervalSinceNow: Double(ns) / Double(1_000_000_000))
+        case .microseconds(let us):
+            timeoutTime = Date(timeIntervalSinceNow: Double(us) / Double(1_000_000))
+        case .milliseconds(let ms):
+            timeoutTime = Date(timeIntervalSinceNow: Double(ms) / Double(1_000))
+        case .seconds(let s):
+            timeoutTime = Date(timeIntervalSinceNow: Double(s))
+        case .never:
+            timeoutTime = Date.distantFuture
+        }
+        precondition(bufferSize > 0, "Buffer size must be > 0, is \(bufferSize)") // Can't test a precondition.
+        self.bufferSize = bufferSize
+    }
+    
+    // MARK: Methods that must be overridden
+    
+    /// Takes the next item from the subscription and accumulates it into the result (called each time `on(next: T)` is called).
+    /// - parameter next: The item to accumulate.
+    open func accumulatee(next: T) throws {
+        fatalError("Method must be overridden.") // Can't test a fatal error.
+    }
+    
+    /// Return the accumulation so far (called when the accumulation is complete and its value stored in status and returned by `get`).
+    open var accumulator: R {
+        fatalError("Getter must be overridden.") // Can't test a fatal error.
+    }
+}
+
+/// A `Subscriber` that is also a `Future` that takes items from its subscription and passes them to the given `updateAccumulatingResult` which combines them with the given `initialResult` and when finished returns via `get` the now modified `initialResult` (Reactive Stream version of `Sequence.reduce(into:_:)`).
+/// - warning: Do not manually call `accumulatee(next: T)`, it used by the superclass.
+/// - note:
+///   - `Subscriber`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///   - As all `Subscriber`s that also `Future`s this subscriber can have only one subscription in its liefetime since a future can only complete once.
+///   - Since the subscriber is also a future it can be cancelled or timeout, both of which in turn cancells its subscription.
+///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
+///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
+/// - parameters:
+///   - T: The type of the elements subscribed to.
+///   - R: The result type of the accumulation.
+public final class ReduceSubscriber<T, R>: AccumulatingSubscriber<T, R> {
+    /// A `Subscriber` that is also a future that takes items from its subscription and passes them to the given `updateAccumulatingResult` which combines them with the given `initialResult` and when finished returns via `get` the now modified `initialResult` (Reactive Stream version of `Sequence.reduce(into:_:)`).
     /// - precondition: `bufferSize` must be > 0.
     /// - parameters:
     ///   - timeout: The time that `get` will wait before returning `nil` and setting `status` to a timeout error (default `Futures.defaultTimeout`).
@@ -327,21 +375,20 @@ public final class ReduceSubscriber<T, R>: Future<R>, Subscriber {
     ///   - accumulator: The running accumulator (this is the given `into` and is the value returned via `get`).
     ///   - next: The next item to be accumulated.
     public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: Int = ReactiveStreams.defaultBufferSize, into initialResult: R, updateAccumulatingResult: @escaping ( _ accumulator: inout R, _ next: T) throws -> ()) {
-        switch timeout {
-        case .nanoseconds(let ns):
-            timeoutTime = Date(timeIntervalSinceNow: Double(ns) / Double(1_000_000_000))
-        case .microseconds(let us):
-            timeoutTime = Date(timeIntervalSinceNow: Double(us) / Double(1_000_000))
-        case .milliseconds(let ms):
-            timeoutTime = Date(timeIntervalSinceNow: Double(ms) / Double(1_000))
-        case .seconds(let s):
-            timeoutTime = Date(timeIntervalSinceNow: Double(s))
-        case .never:
-            timeoutTime = Date.distantFuture
-        }
-        precondition(bufferSize > 0, "Buffer size must be > 0, is \(bufferSize)") // Can't test a precondition.
-        self.bufferSize = bufferSize
         result = initialResult
-        accumulatee = updateAccumulatingResult
+        self.updateAccumulatingResult = updateAccumulatingResult
+        super.init(timeout: timeout, bufferSize: bufferSize)
+    }
+    
+    private let updateAccumulatingResult: ( _ accumulator: inout R, _ next: T) throws -> ()
+    
+    public override func accumulatee(next: T) throws {
+        try updateAccumulatingResult(&result, next)
+    }
+    
+    private var result: R
+    
+    public override var accumulator: R {
+        return result
     }
 }
