@@ -8,7 +8,7 @@
 
 import Foundation
 
-// Useful utility for UI porogramming.
+// Useful utility for UI programming.
 extension Thread {
     /// Run the given closure on the main thread (thread hops to main) and *wait* for it to complete before returning its value; useful for updating and reading UI components.
     /// Checks to see if already executing on the main thread and if so does not change to main thread before executing closure, since changing to main when already on main would cause a deadlock.
@@ -26,10 +26,38 @@ extension Thread {
     }
 }
 
+/// Operator for stream like flow.
+/// - note:
+//    - Double tilde used because `~>` already defined in the standard library, but without associativity and therefore can't be chained.
+///   - The wavy line `~~` is reminiscent of both 'S' for subscription and the fact that flow goes up and down.
+///   - The `>` is the direction of the flow.
+infix operator ~~> : MultiplicationPrecedence
+
+/// Operator for stream like flow that force unwraps an optional.
+infix operator ~~>! : MultiplicationPrecedence
+
+/// Operator for stream like flow that ignores a `nil` optional.
+infix operator ~~>? : MultiplicationPrecedence
+
+/// Useful constants for use with futures (inside an enum to give them their own namespace - note cannot go in `Future` with Swift 4 because `Future` is generic).
+public enum Futures {
+    /// Suggested default timeout.
+    /// - note: The current implementation is 1 second.
+    public static let defaultTimeout = DispatchTimeInterval.seconds(1)
+    
+    /// Suggested maximum sleep time whilst waiting for a timeout before checking for termination.
+    /// - note: The current implementation is 1/4 second.
+    public static let defaultMaximumSleepTime = 0.25
+    
+    /// Suggested minimum sleep time whilst waiting for a timeout that it is worth actually sleeping for (the implication of which is that a timeout could be short by this amount).
+    /// - note: The current implementation is 10 milli-seconds.
+    public static let defaultMinimumSleepTime = 0.01
+}
+
 /// All possible states for a `Future`; a future is in exactly one of these.
 /// - note:
 ///   - The `Future` transitions from running and then to either completed or threw, once transitioned to completed or threw it cannot change state again.
-///   - Most futures start in running but they can start in completed ot threw if desired.
+///   - Most futures start in running but they can start in completed or threw if desired.
 public enum FutureStatus<T> {
     /// Currently running or waiting to run; has not completed, was not cancelled, has not timed out, and has not thrown.
     case running
@@ -40,16 +68,6 @@ public enum FutureStatus<T> {
     /// Was cancelled, timed out, or calculation threw an exception; no longer running.
     case threw(error: Error)
 }
-
-/// Operator for stream like flow.
-/// - note: Double tilde used because `~>` already defined in the standard library, but without associativity and therefore can't be chained.
-infix operator ~~> : MultiplicationPrecedence
-
-/// Operator for stream like flow that force unwraps an optional.
-infix operator ~~>! : MultiplicationPrecedence
-
-/// Operator for streeam like flow that ignores a `nil` optional.
-infix operator ~~>? : MultiplicationPrecedence
 
 /// An error that signals the future was terminated.
 public enum TerminateFuture: Error {
@@ -96,19 +114,19 @@ open class Future<T> {
     ///   - If a future is cancelled subsequent calls to `get` will return nil; even if the calculation is still running and hence status has not updated.
     func cancel() {}
     
-    /// Operator to get the result from an asynchronuous execution in a stream like syntax; `left ~> right` is equivalent to `right = left.get`.
+    /// Operator to get the result from an asynchronous execution in a stream like syntax; `left ~> right` is equivalent to `right = left.get`.
     /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~> result` (the correct construct is `future ~~> &result` - note `&`).*
     static func ~~> (left: Future<T>, right: inout T?) {
         right = left.get
     }
     
-    /// Operator to get and force unwrap the result from an asynchronuous execution in a stream like syntax; `left ~>! right` is equivalent to `right = left.get!`.
+    /// Operator to get and force unwrap the result from an asynchronous execution in a stream like syntax; `left ~>! right` is equivalent to `right = left.get!`.
     /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~>! result` (the correct construct is `future ~~>! &result` - note `&`).*
     static func ~~>! (left: Future<T>, right: inout T) {
         right = left.get!
     }
     
-    /// Operator to get and ignore if `nil` the result from an asynchronuous execution in a stream like syntax; `left ~>!? right` is equivalent to `right = left.get?`.
+    /// Operator to get and ignore if `nil` the result from an asynchronous execution in a stream like syntax; `left ~>!? right` is equivalent to `right = left.get?`.
     /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~>? result` (the correct construct is `future ~~>? &result` - note `&`).*
     static func ~~>? (left: Future<T>, right: inout T) {
         if let left = left.get {
@@ -129,14 +147,14 @@ public final class AsynchronousFuture<T>: Future<T> {
     
     private let timeoutTime: DispatchTime
     
-    private var terminateFuture = Atomic<TerminateFuture?>(nil) // Set in forground, read in background.
+    private var terminateFuture = Atomic<TerminateFuture?>(nil) // Set in foreground, read in background.
     
     /// - note: The default queue is the global queue with default quality of service.
     /// - note:
     ///   Regarding the `timeout` argument:
     ///   - Timeout starts from when the future is created, not when `get` is called.
     ///   - The time used for a timeout is processor time; i.e. it excludes time when the computer is in sleep mode.
-    ///   - The default timeout is 1 second.
+    ///   - The default timeout is `Futures.defaultTimeout`.
     ///   - The timeout is only checked when `get` is called; i.e. the calculation will continue for longer than timeout, potentially indefinitely, if `get` is not called.
     ///   - If the future's calculation respects its `terminateFuture` argument then a timeout will break a deadlock.
     ///   - Once a future has timed out that call and subsequent calls to get will return nil.
@@ -144,7 +162,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     /// - warning:
     ///   Be **very** careful about setting long timeouts; if a deadlock occurs it is diagnosed/broken by a timeout occurring!
     ///   If the calculating method tries its `throwIfTerminated` argument a timeout will break a deadlock, otherwise it will only detect a deadlock.
-    init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = .seconds(1), calculation: @escaping (_ terminateFuture: () throws -> Void) -> FutureStatus<T>) {
+    init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) -> FutureStatus<T>) {
         self.timeoutTime = DispatchTime.now() + timeout
         super.init() // Have to complete initialization before result can be calculated.
         queue.async { // Deliberately holds a strong reference to self, so that a future can be side effecting.
@@ -170,7 +188,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     /// See above `init` for description.
     /// This `init` accepts a closure that returns a `T`; the above `init`'s closure returns a `FutureStatus<T>`.
     /// This `init`'s closure is wrapped to return a `FutureStatus<T>` and this `init` calls the above `init`.
-    convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = .seconds(1), calculation: @escaping (_ terminateFuture: () throws -> Void) throws -> T) {
+    convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) throws -> T) {
         self.init(queue: queue, timeout: timeout) { terminateFuture -> FutureStatus<T> in
             var resultOrError: FutureStatus<T>
             do {
@@ -185,7 +203,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     /// See `init` 2 above for description.
     /// This `init` accepts a closure that accepts no arguments, unlike the closures for the other `init`s that accept `terminateFuture`, and returns a `(T?, Error?)`; the `init`' 2 above's closure returns a `FutureStatus<T>`.
     /// This `init`'s closure is wrapped to return a `FutureStatus<T>` and this `init` calls the `init` 2 above.
-    convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = .seconds(1), calculation: @escaping () -> (T?, Error?)) {
+    convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping () -> (T?, Error?)) {
         self.init(queue: queue, timeout: timeout) { _ -> FutureStatus<T> in
             var resultOrError: FutureStatus<T>
             let (result, error) = calculation()
@@ -259,3 +277,4 @@ public final class FailedFuture<T>: Future<T> {
         _status = .threw(error: error)
     }
 }
+

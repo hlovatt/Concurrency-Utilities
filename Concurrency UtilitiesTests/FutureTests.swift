@@ -22,7 +22,7 @@ class FutureTests: XCTestCase {
     }
     
     // MARK: Future Examples
-
+    
     private func sleepUpTo100ms() -> Future<Void> {
         return AsynchronousFuture(timeout: .milliseconds(100)) {
             while true {
@@ -75,29 +75,70 @@ class FutureTests: XCTestCase {
         XCTAssertEqual(test, result)
     }
     
+    func testWrappingCompletionHandlerInFuture() {
+        let test = "Hello, world!"
+        func getFromWeb(url _: String, completion: (_ result: String?, _ error: Error?) -> Void) {
+            completion(test, nil)
+        }
+        func getFromWeb(url: String) -> Future<String> {
+            return AsynchronousFuture { () -> (String?, Error?) in
+                var resultError: (String?, Error?)
+                getFromWeb(url: url) { // Call the original completion handler version.
+                    resultError = ($0, $1) // Store its result.
+                }
+                return resultError
+            }
+        }
+        let future = getFromWeb(url: "")
+        var result: String? = "Failure!"
+        future ~~> result
+        XCTAssertEqual(test, result)
+    }
+    
+    func testCompletableFutureThatCompletes() {
+        let test = "Hello, world!"
+        let future = AsynchronousFuture(timeout: .seconds(0)) { _ -> String in // Note zero timeout.
+            return test
+        }
+        Thread.sleep(forTimeInterval: 0.01) // Stuff that would take some time goes here.
+        let result = future.get ?? "Failed!" // Because timeout is zero `get` never waits.
+        XCTAssertEqual(test, result)
+    }
+    
+    func testCompletableFutureThatDoesntComplete() {
+        let test = "Hello, world!"
+        let future = AsynchronousFuture(timeout: .seconds(0)) { _ -> String in // Note zero timeout.
+            Thread.sleep(forTimeInterval: 0.01) // Takes too long!
+            return test
+        }
+        Thread.sleep(forTimeInterval: 0) // Doesn't take long.
+        let result = future.get ?? "Failed!" // Because timeout is zero `get` never waits.
+        XCTAssertEqual("Failed!", result)
+    }
+    
+    func testAsynchronousFutureCancelThenGet() {
+        let cancelled = sleepUpTo100ms()
+        cancelled.cancel()
+        XCTAssertNil(cancelled.get)
+    }
+    
     // MARK: Future coverage tests
     
-    func testAsynchronuousFutureGet() {
+    func testAsynchronousFutureGet() {
         let completed = AsynchronousFuture { _ in
             true // completes straight away.
         }
         XCTAssertTrue(completed.get!)
     }
     
-    func testAsynchronuousFutureThrew() {
+    func testAsynchronousFutureThrew() {
         let threw = AsynchronousFuture { _ in
             throw TerminateFuture.cancelled // Throws straight away.
         }
         XCTAssertNil(threw.get)
     }
     
-    func testAsynchronuousFutureCancelThenGet() {
-        let cancelled = sleepUpTo100ms()
-        cancelled.cancel()
-        XCTAssertNil(cancelled.get)
-    }
-    
-    func testAsynchronuousFutureTimeout() {
+    func testAsynchronousFutureTimeout() {
         let s100ms = sleepUpTo100ms()
         s100ms.get // Wait for timeout
         Thread.sleep(forTimeInterval: 0.05) // Wait for status to update.
@@ -109,7 +150,7 @@ class FutureTests: XCTestCase {
             }
             switch e {
             case .timedOut:
-                return // Expected result.
+            return // Expected result.
             default:
                 XCTFail("Should have timed out!")
             }
@@ -118,7 +159,7 @@ class FutureTests: XCTestCase {
         }
     }
     
-    func testAsynchronuousFutureCancel() {
+    func testAsynchronousFutureCancel() {
         let s100ms = sleepUpTo100ms()
         s100ms.cancel() // Cancel the future.
         Thread.sleep(forTimeInterval: 0.05) // Wait for status to update.
@@ -130,7 +171,7 @@ class FutureTests: XCTestCase {
             }
             switch e {
             case .cancelled:
-                return // Expected result.
+            return // Expected result.
             default:
                 XCTFail("Should have cancelled!")
             }
@@ -139,7 +180,7 @@ class FutureTests: XCTestCase {
         }
     }
     
-    func testAsynchronuousFutureCancelThenCancelAgain() {
+    func testAsynchronousFutureCancelThenCancelAgain() {
         let cancelled = sleepUpTo100ms()
         cancelled.cancel()
         Thread.sleep(forTimeInterval: 0.05) // Allow time for status to update.
@@ -147,7 +188,7 @@ class FutureTests: XCTestCase {
         XCTAssertNil(cancelled.get)
     }
     
-   func testAsynchronuousFutureCancelDetectedAfterExecutionFinished() {
+    func testAsynchronousFutureCancelDetectedAfterExecutionFinished() {
         let s100ms = sleepUpTo100ms()
         Thread.sleep(forTimeInterval: 0.01)
         s100ms.cancel() // Cancel the future, whilst it is running.
@@ -160,7 +201,7 @@ class FutureTests: XCTestCase {
             }
             switch e {
             case .cancelled:
-                return // Expected result.
+            return // Expected result.
             default:
                 XCTFail("Should have cancelled!")
             }
@@ -169,7 +210,7 @@ class FutureTests: XCTestCase {
         }
     }
     
-    func testAsynchronuousFutureWrappingCompletionHandlerCompleted() {
+    func testAsynchronousFutureWrappingCompletionHandlerCompleted() {
         let completed = AsynchronousFuture { () -> (_: Void?, _: Error?) in
             ((), nil) // Completes straight away.
         }
@@ -183,7 +224,7 @@ class FutureTests: XCTestCase {
         }
     }
     
-    func testAsynchronuousFutureWrappingCompletionHandlerCancel() {
+    func testAsynchronousFutureWrappingCompletionHandlerCancel() {
         let cancels = AsynchronousFuture { () -> (_: Void?, _: Error?) in
             (nil, TerminateFuture.cancelled) // Cancels straight away.
         }
@@ -270,20 +311,21 @@ class FutureTests: XCTestCase {
     
     // MARK: Templates (in case needed in future).
     
-//    override func setUp() {
-//        super.setUp()
-//        // Put setup code here. This method is called before the invocation of each test method in the class.
-//    }
-//    
-//    override func tearDown() {
-//        // Put teardown code here. This method is called after the invocation of each test method in the class.
-//        super.tearDown()
-//    }
-//    
-//    func testPerformanceExample() {
-//        // This is an example of a performance test case.
-//        self.measure {
-//            // Put the code you want to measure the time of here.
-//        }
-//    }
+    //    override func setUp() {
+    //        super.setUp()
+    //        // Put setup code here. This method is called before the invocation of each test method in the class.
+    //    }
+    //
+    //    override func tearDown() {
+    //        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    //        super.tearDown()
+    //    }
+    //
+    //    func testPerformanceExample() {
+    //        // This is an example of a performance test case.
+    //        self.measure {
+    //            // Put the code you want to measure the time of here.
+    //        }
+    //    }
 }
+

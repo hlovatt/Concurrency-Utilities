@@ -14,7 +14,7 @@ public final class Atomic<T> {
     
     private var _value: T
     
-    /// Creat and initialize a new atomic.
+    /// Create and initialize a new atomic.
     /// - parameter initialValue: The initial value of the variable.
     init(_ initialValue: T) {
         _value = initialValue
@@ -38,11 +38,11 @@ public final class Atomic<T> {
         }
     }
     
-    /// Atomically update the value (get then set value in one operation guaranteeing no `get`s, `set`s, or `update`s from other threads inbetween).
+    /// Atomically update the value (get then set value in one operation guaranteeing no `get`s, `set`s, or `update`s from other threads in between).
     /// - parameters:
     ///   - updater: A closure that accepts the current value and returns the new value.
     ///   - oldValue: The old value supplied to given updater.
-    /// - returns: The updatded value (which can be ignored).
+    /// - returns: The updated value (which can be ignored).
     @discardableResult func update(updater: (_ oldValue: T) -> T) -> T {
         var result: T? = nil
         queue.sync {
@@ -52,3 +52,4 @@ public final class Atomic<T> {
         return result!
     }
 }
+

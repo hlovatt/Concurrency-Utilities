@@ -27,7 +27,84 @@ class ReactiveStreamTests: XCTestCase {
     
     // MARK: Coverage tests
     
-    func testReductionRefils() {
+    func testIteratingPublisherRejecting2ndSubscription() {
+        class Test: IteratingPublisher<Int> {
+            var count = -1
+            override func next() -> Int? {
+                Thread.sleep(forTimeInterval: 0.001) // Allow time for 2nd subscription.
+                count += 1
+                return count < 8 ? count : nil
+            }
+        }
+        let publisher = Test()
+        let subscriber1 = ReduceSubscriber(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
+            result += next
+        }
+        let subscriber2 = ReduceSubscriber(into: 0) { (_: inout Int, _: Int) in
+            XCTFail("Should never become subscribed.")
+        }
+        publisher ~~> subscriber1
+        publisher ~~> subscriber2 // Should fail.
+        var result = 0
+        subscriber1 ~~>! result
+        XCTAssertEqual(28, result)
+        switch subscriber2.status {
+        case .threw(let error):
+            switch error as! PublisherErrors {
+            case .subscriptionRejected(_):
+            break // Should be executed.
+            default:
+                XCTFail("Should be an error")
+            }
+        default:
+            XCTFail("Should be an error")
+        }
+    }
+    
+    func testIteratingPublisherDefaultReset() {
+        class Test: IteratingPublisher<Int> {
+            var count = -1
+            override func next() -> Int? {
+                count += 1
+                return count < 8 ? count : nil
+            }
+        }
+        let publisher = Test()
+        let subscriber = ReduceSubscriber(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = 0
+        publisher ~~> subscriber ~~>! result
+        XCTAssertEqual(28, result)
+    }
+    
+    func testReductionDoubleSubscription() {
+        let test = "Hello, world!"
+        let publisher1 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher2 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let subscriber = ReduceSubscriber(bufferSize: 1, into: "") { (_: inout String, _: Character) in
+            Thread.sleep(forTimeInterval: 0.01) // Allow time for 2nd subscription.
+        }
+        publisher1 ~~> subscriber // Should succeed.
+        switch subscriber.status {
+        case .running:
+            break
+        default:
+            XCTFail("Should be running.")
+        }
+        publisher2 ~~> subscriber // Should fail.
+        switch subscriber.status {
+        case .threw(let error):
+            switch error as! SubscriberErrors {
+            case .tooManySubscriptions(let number):
+                XCTAssertEqual(number, 2)
+            }
+        default:
+            XCTFail("Should have thrown.")
+        }
+    }
+    
+    func testReductionRefills() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
         let subscriber = ReduceSubscriber(bufferSize: 1, into: "") { (result: inout String, next: Character) in
@@ -38,7 +115,7 @@ class ReactiveStreamTests: XCTestCase {
         XCTAssertEqual(test, result)
     }
     
-    func testOneIterationSequenceWithRefilAndFinishAtBufferBoundary() {
+    func testOneIterationSequenceWithRefillAndFinishAtBufferBoundary() {
         struct Test: Sequence, IteratorProtocol {
             var count = 0
             mutating func next() -> Int? {
@@ -175,7 +252,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionTimesOutS() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .seconds(1), into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriber(timeout: .milliseconds(50), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
         publisher ~~> subscriber
@@ -193,7 +270,7 @@ class ReactiveStreamTests: XCTestCase {
         }
     }
     
-    // Have to test that this doesn't occure!
+    // Have to test that this doesn't occur!
     func testReductionTimesOutNever() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
@@ -202,28 +279,6 @@ class ReactiveStreamTests: XCTestCase {
         }
         publisher ~~> subscriber
         XCTAssertEqual(test, subscriber.get ?? "Failed!")
-    }
-    
-    func testReductionRejectsMultipleSubscriptions() {
-        let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .milliseconds(100), into: "") { (_: inout String, _: Character) in
-            Thread.sleep(forTimeInterval: 0.1) // Allow time for multiple subscriptions.
-        }
-        publisher ~~> subscriber
-        publisher ~~> subscriber // Subscribe a 2nd time - which should cause an error.
-        publisher ~~> subscriber // Subscribe a 3rd time - which should do nothing.
-        switch subscriber.status {
-        case .threw(let error):
-            switch error as! SubscriberErrors {
-            case .tooManySubscriptions(let number):
-                XCTAssertEqual(number, 2)
-            default:
-                XCTFail("Should be an error")
-            }
-        default:
-            XCTFail("Should be an error")
-        }
     }
     
     func testReductionCancelIgnoredAfterCompletion() {
@@ -256,8 +311,6 @@ class ReactiveStreamTests: XCTestCase {
             switch error as! SubscriberErrors {
             case .tooManySubscriptions(let number):
                 XCTAssertEqual(number, 0)
-            default:
-                XCTFail("Should be an error")
             }
         default:
             XCTFail("Should be an error")
@@ -280,12 +333,8 @@ class ReactiveStreamTests: XCTestCase {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
         class N0Subscriber: Subscriber {
-            typealias SubscriberItem = Character
-            
-            var isComplete  = false
-            
             func onComplete() {
-                isComplete = true
+                XCTFail("Should not be called")
             }
             
             func on(error: Error) {
@@ -302,15 +351,13 @@ class ReactiveStreamTests: XCTestCase {
         }
         let subscriber = N0Subscriber()
         publisher ~~> subscriber
-        XCTAssertTrue(subscriber.isComplete)
+        publisher ~~> subscriber // Can subscribe 2nd time since 1st subscription cancelled
     }
     
     func testRequestNegativeItems() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
         class NNegativeSubscriber: Subscriber {
-            typealias SubscriberItem = Character
-            
             var isError  = false
             
             func onComplete() {
@@ -336,20 +383,21 @@ class ReactiveStreamTests: XCTestCase {
     
     // MARK: Templates (in case needed in future).
     
-//    override func setUp() {
-//        super.setUp()
-//        // Put setup code here. This method is called before the invocation of each test method in the class.
-//    }
-//    
-//    override func tearDown() {
-//        // Put teardown code here. This method is called after the invocation of each test method in the class.
-//        super.tearDown()
-//    }
-//    
-//    func testPerformanceExample() {
-//        // This is an example of a performance test case.
-//        self.measure {
-//            // Put the code you want to measure the time of here.
-//        }
-//    }
+    //    override func setUp() {
+    //        super.setUp()
+    //        // Put setup code here. This method is called before the invocation of each test method in the class.
+    //    }
+    //
+    //    override func tearDown() {
+    //        // Put teardown code here. This method is called after the invocation of each test method in the class.
+    //        super.tearDown()
+    //    }
+    //
+    //    func testPerformanceExample() {
+    //        // This is an example of a performance test case.
+    //        self.measure {
+    //            // Put the code you want to measure the time of here.
+    //        }
+    //    }
 }
+
