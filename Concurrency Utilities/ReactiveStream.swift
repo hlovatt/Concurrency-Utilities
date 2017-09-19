@@ -125,7 +125,12 @@ public extension Subscriber {
 /// Wrap any `Subscriber` in a standard class, useful where `Subscriber` is needed as a type (it is a protocol with associated type and therefore not a type itself but rather a generic constraint).
 ///
 /// EG Implementations of `Subscription` typically contain a reference to the `Subscriber` they belong to and this reference is typed `AnySubscriber` because `Subscriber` cannot be used as a type because it has an associated type `SubscriberT`.
-public class AnySubscriber<T>: Subscriber {
+///
+/// - note:
+///   - In Swift terminology `AnySubscriber` is said to type erase `Subscriber`; meaning that it doesn't matter what type of subscriber is given to `AnySubscriber`'s `init` the result will always be the same type, `AnySubscriber`.
+///   - For a Java, Scala, Haskell, etc. programmer this terminology is confusing because type erasure in these languages refers to erasing the generic type, in this case `T`, not the main type, in this case `AnySubscriber`.
+///   - Further confusion for the Java, Scala, Haskell, etc. programmer is that `Subscriber` would be a type and not a generic constraint anyway, therefore `AnySubscriber` would be unnecessary in these languages.
+public final class AnySubscriber<T>: Subscriber {
     public typealias SubscriberT = T
     
     private let complete: () -> Void
@@ -138,7 +143,7 @@ public class AnySubscriber<T>: Subscriber {
     
     /// Wrap the given subscriber, which can be any type of subscriber, so that the type becomes `AnySubscriber` regardless of the originating subscriber's specific type.
     /// - parameter subscriber: The subscriber to wrap.
-    init<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == T {
+    public init<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == T {
         complete = {
             subscriber.onComplete()
         }
@@ -208,4 +213,3 @@ public enum ReactiveStreams {
     /// - note: The current implementation is 256.
     public static let defaultBufferSize = 256
 }
-

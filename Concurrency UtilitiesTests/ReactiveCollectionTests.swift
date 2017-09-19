@@ -25,6 +25,20 @@ class ReactiveStreamTests: XCTestCase {
         XCTAssertEqual(test, helloWorldResult)
     }
     
+    func testSubscribeCompleteSubscribeAndCompleteAgain() {
+        let test = "Hello, world!"
+        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let subscriber = ReduceSubscriber(into: "") { (result: inout String, character: Character) in
+            result.append(character) // Copy the string a character at a time.
+        }
+        var result = "Failed!"
+        publisher ~~> subscriber ~~>? result
+        XCTAssertEqual(test, result)
+        result = "Failed!"
+        publisher ~~> subscriber ~~>? result // Should work again once finished 1st time.
+        XCTAssertEqual(test, result)
+    }
+    
     // MARK: Coverage tests
     
     func testIteratingPublisherRejecting2ndSubscription() {
@@ -177,12 +191,12 @@ class ReactiveStreamTests: XCTestCase {
         case .threw(let error):
             switch error as! TerminateFuture {
             case .cancelled:
-            break // Should be executed.
+                break // Should be executed.
             default:
-                XCTFail("Should be an error")
+                XCTFail("Should be `.cancelled`.")
             }
         default:
-            XCTFail("Should be an error")
+            XCTFail("Should be `.threw`.")
         }
     }
     
@@ -198,12 +212,12 @@ class ReactiveStreamTests: XCTestCase {
         case .threw(let error):
             switch error as! TerminateFuture {
             case .timedOut:
-            break // Should be executed.
+                break // Should be executed.
             default:
-                XCTFail("Should be an error")
+                XCTFail("Should be `.timedOut`.")
             }
         default:
-            XCTFail("Should be an error")
+            XCTFail("Should be `.threw`.")
         }
     }
     
@@ -219,12 +233,12 @@ class ReactiveStreamTests: XCTestCase {
         case .threw(let error):
             switch error as! TerminateFuture {
             case .timedOut:
-            break // Should be executed.
+                break // Should be executed.
             default:
-                XCTFail("Should be an error")
+                XCTFail("Should be `.timedOut`")
             }
         default:
-            XCTFail("Should be an error")
+            XCTFail("Should be `.threw`")
         }
     }
     
@@ -240,12 +254,12 @@ class ReactiveStreamTests: XCTestCase {
         case .threw(let error):
             switch error as! TerminateFuture {
             case .timedOut:
-            break // Should be executed.
+                break // Should be executed.
             default:
-                XCTFail("Should be an error")
+                XCTFail("Should be `.timedOut`")
             }
         default:
-            XCTFail("Should be an error")
+            XCTFail("Should be `.threw`")
         }
     }
     
@@ -263,10 +277,10 @@ class ReactiveStreamTests: XCTestCase {
             case .timedOut:
             break // Should be executed.
             default:
-                XCTFail("Should be an error")
+                XCTFail("Should be `.timedOut`")
             }
         default:
-            XCTFail("Should be an error")
+            XCTFail("Should be `.threw`")
         }
     }
     
@@ -294,7 +308,7 @@ class ReactiveStreamTests: XCTestCase {
         case .completed(let result):
             XCTAssertEqual(test, result)
         default:
-            XCTFail("Should have completed")
+            XCTFail("Should have completed.")
         }
     }
     
@@ -313,7 +327,7 @@ class ReactiveStreamTests: XCTestCase {
                 XCTAssertEqual(number, 0)
             }
         default:
-            XCTFail("Should be an error")
+            XCTFail("Should be `.threw`")
         }
     }
     

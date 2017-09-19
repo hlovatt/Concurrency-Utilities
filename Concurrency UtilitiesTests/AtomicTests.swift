@@ -41,6 +41,45 @@ class AtomicTests: XCTestCase {
         XCTAssertFalse(error.value)
     }
     
+    // Test that task 2 sees change made by task 1.
+    // It is likely, though not guaranteed, that the two tasks are on seperate cores since they have different QOS.
+    func testAtomicAsVolatile() {
+        let test = Atomic(0)
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: DispatchQoS.QoSClass.background).async {
+            defer { group.leave() }
+            test.value = 1
+        }
+        group.wait()
+        var error = false
+        group.enter()
+        DispatchQueue.global(qos: DispatchQoS.QoSClass.userInteractive).async {
+            defer { group.leave() }
+            error = test.value != 1
+        }
+        group.wait()
+        XCTAssertFalse(error)
+    }
+    
+    func testAtomicAsLock() {
+        let lock = Atomic<Void>(()) // Test that multiple threads lock each other out.
+        var shared = 0 // Not using `Atomic` as a volatile, but OK since only local cache neeed to be up to date.
+        let group = DispatchGroup()
+        for i in 1 ... 10 {
+            group.enter()
+            DispatchQueue.global().async {
+                defer { group.leave() }
+                lock.update {
+                    shared = i
+                    XCTAssertEqual(i, shared)
+                    return ()
+                }
+            }
+        }
+        group.wait()
+    }
+    
     // MARK: Templates (in case needed in future).
     
     //    override func setUp() {

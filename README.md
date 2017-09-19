@@ -11,9 +11,9 @@ The file `ReactiveStream.swift` just contains the protocols etc. to define a Rea
 ## Atomic
 Provides atomic access to a value; you can `get`, `set` and `update` the value. To update a value you supply a closure to `update` that accepts the old value and returns the new value; the `update` method also returns the new value from the closure. Calls to `get`, `set` and `update` can occur is any order and from any thread and are guaranteed not to expose partially updated values. Calls to `get`, `set` and `update` block until they have completed.
 
-Update can be used as a lock as well as providing atomicity, e.g.:
+`update` can be used as a lock as well as providing atomicity, e.g.:
 
-    let lock = Atomic<Void>()
+    let lock = Atomic<Void>(()) // `()` is `Void` literal.
     …
     // In thread 1
     lock.update {
@@ -28,6 +28,18 @@ Update can be used as a lock as well as providing atomicity, e.g.:
     }
 
 The threads will block until the other has finished because they are sharing `lock`.
+
+`get` and `set` can be used to ensure visibility accross threads (`volatile` keyword in other C like languages), e.g.:
+
+    let volatile = Atomic<T>(initialValue)
+    …
+    // In thread 1
+    volatile.value = … // Write to volatile.
+    …
+    // In thread 2
+    let value = volatile.value // Read from volatile.
+
+Thread 2 will see the changes made by thread 1.
 
 `Atomic` is a class and therefore instances would normally be declared using `let` (which can seem odd since they obviously mutate!).
 
@@ -152,9 +164,10 @@ Hello World using this library is:
 
 Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
 
-Typically you use the sequence like classes, `ForEachProducer`, `ReduceSubscriber`, etc., directly, however base classes are provided for simplifying writing your own Reactive Stream implementations: `IteratingPublisher` , `AccumulatingSubscriber`, etc.
-
 See `ReativeCollectionTests.swift` for examples.
+
+## Reactive Collection Base Classes
+Typically you use the sequence like classes, `ForEachProducer`, `ReduceSubscriber`, etc., from Reactive Collection, however base classes are provided for simplifying writing your own Reactive Stream implementations: `IteratingPublisher` , `BaseSubscriber`,  `AnyBaseSubscriber`,  `AccumulatingSubscriber`, `InlineProcessor`, etc.
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.

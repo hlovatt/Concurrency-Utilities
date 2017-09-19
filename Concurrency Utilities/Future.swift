@@ -56,7 +56,7 @@ public enum Futures {
 
 /// All possible states for a `Future`; a future is in exactly one of these.
 /// - note:
-///   - The `Future` transitions from running and then to either completed or threw, once transitioned to completed or threw it cannot change state again.
+///   - The `Future` transitions from running and then to either completed or threw, for non-resettable (most) futures once transitioned to completed or threw it cannot change state again.
 ///   - Most futures start in running but they can start in completed or threw if desired.
 public enum FutureStatus<T> {
     /// Currently running or waiting to run; has not completed, was not cancelled, has not timed out, and has not thrown.
@@ -93,7 +93,7 @@ open class Future<T> {
     ///   - This status lag is due to the underlying thread system provided by the operating system that typically does not allow a running thread to be terminated.
     ///   - Because status can lag cancel and timeout; prefer get over status, for obtaining the result of a future and if detailed reasons for a failure are not required.
     ///   - Status however offers detailed information if a thread terminates by throwing (including cancellation and timeout) and is therefore very useful for debugging.
-    var status: FutureStatus<T> {
+    open var status: FutureStatus<T> {
         return .threw(error: TerminateFuture.cancelled)
     }
     
@@ -102,7 +102,7 @@ open class Future<T> {
     /// - note:
     ///   - Timeout is only checked when `get` is called.
     ///   - If a future is cancelled or times out then get will subsequently return nil; however it might take some time before status reflects this calculation because status is only updated when the calculation stops.
-    var get: T? {
+    open var get: T? {
         return nil
     }
     
@@ -112,23 +112,23 @@ open class Future<T> {
     ///   - Cancellation is automatically checked on entry and exit to the calculation and therefore status will update before and after execution even if the calculation ignores its argument.
     ///   - Cancellation will not be instantaneous and therefore the future's status will not update immediately; it updates when the calculation terminates (either by returning a value or via a throw).
     ///   - If a future is cancelled subsequent calls to `get` will return nil; even if the calculation is still running and hence status has not updated.
-    func cancel() {}
+    open func cancel() {}
     
     /// Operator to get the result from an asynchronous execution in a stream like syntax; `left ~> right` is equivalent to `right = left.get`.
     /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~> result` (the correct construct is `future ~~> &result` - note `&`).*
-    static func ~~> (left: Future<T>, right: inout T?) {
+    public static func ~~> (left: Future<T>, right: inout T?) {
         right = left.get
     }
     
     /// Operator to get and force unwrap the result from an asynchronous execution in a stream like syntax; `left ~>! right` is equivalent to `right = left.get!`.
     /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~>! result` (the correct construct is `future ~~>! &result` - note `&`).*
-    static func ~~>! (left: Future<T>, right: inout T) {
+    public static func ~~>! (left: Future<T>, right: inout T) {
         right = left.get!
     }
     
     /// Operator to get and ignore if `nil` the result from an asynchronous execution in a stream like syntax; `left ~>!? right` is equivalent to `right = left.get?`.
     /// - note: *The Swift 4 compiler has a bug, see [SR-5853](https://bugs.swift.org/browse/SR-5838), where it infers an `&` that it shouldn't, therefore use `future ~~>? result` (the correct construct is `future ~~>? &result` - note `&`).*
-    static func ~~>? (left: Future<T>, right: inout T) {
+    public static func ~~>? (left: Future<T>, right: inout T) {
         if let left = left.get {
             right = left
         }
@@ -139,7 +139,7 @@ open class Future<T> {
 public final class AsynchronousFuture<T>: Future<T> {
     private let _status = Atomic(FutureStatus<T>.running) // Set in background, read in foreground.
     
-    override var status: FutureStatus<T> {
+    public override var status: FutureStatus<T> {
         return _status.value
     }
     
@@ -162,7 +162,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     /// - warning:
     ///   Be **very** careful about setting long timeouts; if a deadlock occurs it is diagnosed/broken by a timeout occurring!
     ///   If the calculating method tries its `throwIfTerminated` argument a timeout will break a deadlock, otherwise it will only detect a deadlock.
-    init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) -> FutureStatus<T>) {
+    public init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) -> FutureStatus<T>) {
         self.timeoutTime = DispatchTime.now() + timeout
         super.init() // Have to complete initialization before result can be calculated.
         queue.async { // Deliberately holds a strong reference to self, so that a future can be side effecting.
@@ -188,7 +188,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     /// See above `init` for description.
     /// This `init` accepts a closure that returns a `T`; the above `init`'s closure returns a `FutureStatus<T>`.
     /// This `init`'s closure is wrapped to return a `FutureStatus<T>` and this `init` calls the above `init`.
-    convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) throws -> T) {
+    public convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) throws -> T) {
         self.init(queue: queue, timeout: timeout) { terminateFuture -> FutureStatus<T> in
             var resultOrError: FutureStatus<T>
             do {
@@ -203,7 +203,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     /// See `init` 2 above for description.
     /// This `init` accepts a closure that accepts no arguments, unlike the closures for the other `init`s that accept `terminateFuture`, and returns a `(T?, Error?)`; the `init`' 2 above's closure returns a `FutureStatus<T>`.
     /// This `init`'s closure is wrapped to return a `FutureStatus<T>` and this `init` calls the `init` 2 above.
-    convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping () -> (T?, Error?)) {
+    public convenience init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping () -> (T?, Error?)) {
         self.init(queue: queue, timeout: timeout) { _ -> FutureStatus<T> in
             var resultOrError: FutureStatus<T>
             let (result, error) = calculation()
@@ -216,7 +216,7 @@ public final class AsynchronousFuture<T>: Future<T> {
         }
     }
     
-    override var get: T? {
+    public override var get: T? {
         guard terminateFuture.value == nil else { // Catch waiting for a cancel/timeout to actually happen.
             return nil
         }
@@ -238,7 +238,7 @@ public final class AsynchronousFuture<T>: Future<T> {
         }
     }
     
-    override func cancel() {
+    public override func cancel() {
         switch _status.value {
         case .running:
             terminateFuture.value = .cancelled
@@ -252,15 +252,15 @@ public final class AsynchronousFuture<T>: Future<T> {
 public final class KnownFuture<T>: Future<T> {
     private let result: T
     
-    override var status: FutureStatus<T> {
+    public override var status: FutureStatus<T> {
         return .completed(result: result)
     }
     
-    init(_ result: T) {
+    public init(_ result: T) {
         self.result = result
     }
     
-    override var get: T? {
+    public override var get: T? {
         return result
     }
 }
@@ -269,12 +269,11 @@ public final class KnownFuture<T>: Future<T> {
 public final class FailedFuture<T>: Future<T> {
     private let _status: FutureStatus<T>
     
-    override var status: FutureStatus<T> {
+    public override var status: FutureStatus<T> {
         return _status
     }
     
-    init(_ error: Error) {
+    public init(_ error: Error) {
         _status = .threw(error: error)
     }
 }
-
