@@ -1,5 +1,5 @@
 //
-//  ReactiveStreamTests.swift
+//  ReactiveCollectionTests.swift
 //  Concurrency UtilitiesTests
 //
 //  Created by Howard Lovatt on 4/9/17.
@@ -10,26 +10,45 @@ import XCTest
 @testable import Concurrency_Utilities
 
 
-class ReactiveStreamTests: XCTestCase {
+class ReactiveCollectionTests: XCTestCase {
     
     // MARK: Examples
     
     func testHelloWorld() {
         let test = "Hello, world!"
         let helloWorldPublisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let helloWorldSubscriber = ReduceSubscriber(into: "") { (result: inout String, character: Character) in
-            result.append(character) // Copy the string a character at a time.
+        let helloWorldSubscriber = ReduceSubscriberFuture(into: "") { (result: inout String, nextChar: Character) in
+            result.append(nextChar) // Copy the string a character at a time.
         }
         var helloWorldResult = "Failed!"
         helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
         XCTAssertEqual(test, helloWorldResult)
     }
     
+    // MARK: Coverage tests
+    
+//    func testCopyingProducer() {
+//        class CopyingProcessor: InlineProcessorBase<Character, Character> {
+//            override func process(_ inputItem: Character) -> Character {
+//                return inputItem
+//            }
+//        }
+//        let test = "Hello, world!"
+//        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+//        let processor = CopyingProcessor()
+//        let subscriber = ReduceSubscriberFuture(into: "") { (result: inout String, nextChar: Character) in
+//            result.append(nextChar) // Copy the string a character at a time.
+//        }
+//        var result = "Failed!"
+//        publisher ~~> processor ~~> subscriber ~~>? result
+//        XCTAssertEqual(test, result)
+//    }
+    
     func testSubscribeCompleteSubscribeAndCompleteAgain() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(into: "") { (result: inout String, character: Character) in
-            result.append(character) // Copy the string a character at a time.
+        let subscriber = ReduceSubscriberFuture(into: "") { (result: inout String, nextChar: Character) in
+            result.append(nextChar) // Copy the string a character at a time.
         }
         var result = "Failed!"
         publisher ~~> subscriber ~~>? result
@@ -39,22 +58,75 @@ class ReactiveStreamTests: XCTestCase {
         XCTAssertEqual(test, result)
     }
     
-    // MARK: Coverage tests
+    func testSubscribingToMultiplePublishersRejects1stAnd2ndSubscriptions() {
+        class SlowCounter: IteratorPublisherClassBase<Int> {
+            var count: Int
+            init(_ initialCount: Int) {
+                count = initialCount
+            }
+            override func _next() -> Int? {
+                Thread.sleep(forTimeInterval: 0.005) // Allow time for 2nd subscription to happen.
+                count += 1
+                return count < 8 ? count : nil
+            }
+        }
+        let publisher = SlowCounter(-1)
+        let publisher2 = SlowCounter(9)
+        let subscriber = ReduceSubscriberFuture(into: 0) { (result: inout Int, next: Int) in
+            result += next
+        }
+        let test = -10
+        var result = test
+        publisher ~~> subscriber
+        publisher2 ~~> subscriber // Should be rejected by subscriber and 1st subscription cancelled.
+        subscriber ~~>? result // Should fail.
+        XCTAssertEqual(test, result)
+    }
     
-    func testIteratingPublisherRejecting2ndSubscription() {
-        class Test: IteratingPublisher<Int> {
+    func testPublishers2ndSubscriptionAndCompleting1st() {
+        class SlowCounter: IteratorPublisherClassBase<Int> {
+            var count: Int
+            init(_ initialCount: Int) {
+                count = initialCount
+            }
+            override func _next() -> Int? {
+                Thread.sleep(forTimeInterval: 0.005) // Allow time for 2nd subscription to happen.
+                count += 1
+                return count < 8 ? count : nil
+            }
+        }
+        let publisher = SlowCounter(-1)
+        let subscriberPlus = ReduceSubscriberFuture(into: 0) { (result: inout Int, next: Int) in
+            result += next
+        }
+        let subscriberMinus = ReduceSubscriberFuture(into: 0) { (result: inout Int, next: Int) in
+            result -= next
+        }
+        let testOK = 28
+        let testFail = 100
+        var result = testFail
+        publisher ~~> subscriberPlus // Should continue to work.
+        publisher ~~> subscriberMinus // Should be rejected.
+        subscriberMinus ~~>? result // Should fail.
+        XCTAssertEqual(testFail, result)
+        subscriberPlus ~~>? result // Should be OK.
+        XCTAssertEqual(testOK, result)
+    }
+    
+    func testIteratorPublisherRejecting2ndSubscription() {
+        class Test: IteratorPublisherClassBase<Int> {
             var count = -1
-            override func next() -> Int? {
+            override func _next() -> Int? {
                 Thread.sleep(forTimeInterval: 0.001) // Allow time for 2nd subscription.
                 count += 1
                 return count < 8 ? count : nil
             }
         }
         let publisher = Test()
-        let subscriber1 = ReduceSubscriber(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
+        let subscriber1 = ReduceSubscriberFuture(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
             result += next
         }
-        let subscriber2 = ReduceSubscriber(into: 0) { (_: inout Int, _: Int) in
+        let subscriber2 = ReduceSubscriberFuture(into: 0) { (_: inout Int, _: Int) in
             XCTFail("Should never become subscribed.")
         }
         publisher ~~> subscriber1
@@ -66,7 +138,7 @@ class ReactiveStreamTests: XCTestCase {
         case .threw(let error):
             switch error as! PublisherErrors {
             case .subscriptionRejected(_):
-            break // Should be executed.
+                break // Should be executed.
             default:
                 XCTFail("Should be an error")
             }
@@ -75,16 +147,16 @@ class ReactiveStreamTests: XCTestCase {
         }
     }
     
-    func testIteratingPublisherDefaultReset() {
-        class Test: IteratingPublisher<Int> {
+    func testIteratorPublisherDefaultReset() {
+        class Test: IteratorPublisherClassBase<Int> {
             var count = -1
-            override func next() -> Int? {
+            override func _next() -> Int? {
                 count += 1
                 return count < 8 ? count : nil
             }
         }
         let publisher = Test()
-        let subscriber = ReduceSubscriber(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
+        let subscriber = ReduceSubscriberFuture(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
             result += next
         }
         var result = 0
@@ -96,7 +168,7 @@ class ReactiveStreamTests: XCTestCase {
         let test = "Hello, world!"
         let publisher1 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
         let publisher2 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(bufferSize: 1, into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(bufferSize: 1, into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.01) // Allow time for 2nd subscription.
         }
         publisher1 ~~> subscriber // Should succeed.
@@ -121,7 +193,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionRefills() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(bufferSize: 1, into: "") { (result: inout String, next: Character) in
+        let subscriber = ReduceSubscriberFuture(bufferSize: 1, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
         var result = "Failed!"
@@ -140,7 +212,7 @@ class ReactiveStreamTests: XCTestCase {
             }
         }
         let publisher = ForEachPublisher(sequence: Test())
-        let subscriber = ReduceSubscriber(bufferSize: 4, into: "") { (result: inout String, next: Int) in
+        let subscriber = ReduceSubscriberFuture(bufferSize: 4, into: "") { (result: inout String, next: Int) in
             result.append(next.description)
         }
         var result = "Failed!"
@@ -159,7 +231,7 @@ class ReactiveStreamTests: XCTestCase {
             }
         }
         let publisher = ForEachPublisher(sequence: Test())
-        let subscriber = ReduceSubscriber(bufferSize: 9, into: "") { (result: inout String, next: Int) in
+        let subscriber = ReduceSubscriberFuture(bufferSize: 9, into: "") { (result: inout String, next: Int) in
             result.append(next.description)
         }
         var result = "Failed!"
@@ -171,7 +243,7 @@ class ReactiveStreamTests: XCTestCase {
         let test = "Hello, world!"
         let error = "Failed!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(into: "") { (_: inout String, _: Character) in
             throw SubscriberErrors.tooManySubscriptions(number: 0) // Fail by throwing (in example any old error!).
         }
         publisher ~~> subscriber
@@ -182,7 +254,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionCancel() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Allow time for cancel.
         }
         publisher ~~> subscriber
@@ -203,7 +275,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionTimesOutNs() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .nanoseconds(100), into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(timeout: .nanoseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
         publisher ~~> subscriber
@@ -224,7 +296,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionTimesOutUs() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .microseconds(100), into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(timeout: .microseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
         publisher ~~> subscriber
@@ -245,7 +317,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionTimesOutMs() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .milliseconds(100), into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(timeout: .milliseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
         publisher ~~> subscriber
@@ -266,7 +338,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionTimesOutS() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .milliseconds(50), into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(timeout: .milliseconds(50), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
         publisher ~~> subscriber
@@ -288,7 +360,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionTimesOutNever() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(timeout: .never, into: "") { (result: inout String, next: Character) in
+        let subscriber = ReduceSubscriberFuture(timeout: .never, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
         publisher ~~> subscriber
@@ -298,7 +370,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionCancelIgnoredAfterCompletion() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(into: "") { (result: inout String, next: Character) in
+        let subscriber = ReduceSubscriberFuture(into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy string a character at a time.
         }
         publisher ~~> subscriber
@@ -315,7 +387,7 @@ class ReactiveStreamTests: XCTestCase {
     func testReductionStatus() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceSubscriberFuture(into: "") { (_: inout String, _: Character) in
             throw SubscriberErrors.tooManySubscriptions(number: 0) // Fail by throwing (in example any old error!).
         }
         publisher ~~> subscriber
@@ -334,7 +406,7 @@ class ReactiveStreamTests: XCTestCase {
     func testSubscribeInAnySubscriber() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceSubscriber(into: "") { (result: inout String, character: Character) in
+        let subscriber = ReduceSubscriberFuture(into: "") { (result: inout String, character: Character) in
             result.append(character) // Copy the string a character at a time.
         }
         let anySubscriber = AnySubscriber(subscriber) // Wrap in an AnySubscriber (to test AnySubscriber).

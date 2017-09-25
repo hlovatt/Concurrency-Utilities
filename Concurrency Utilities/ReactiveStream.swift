@@ -18,44 +18,47 @@ import Foundation
 /// A `Processor` represents a processing stage — which is both a `Subscriber` and a `Publisher` and obeys the contracts of both.
 public protocol Processor: Subscriber, Publisher {}
 
-/// `Publisher` errors that the publisher reports using `Subscriber.on(error: Error)`, which is then typically reported via its status that is in turn typically from `Future`.
+/// `Publisher` errors that the publisher reports using `Subscriber.on(error: Error)`.
 public enum PublisherErrors: Error {
     /// Subscription request failed.
     case subscriptionRejected(reason: String)
     
     /// Requested illegal number of items.
     case cannotProduceRequestedNumberOfItems(numberRequested: Int, reason: String)
+    
+    /// Existing subscription is terminated.
+    case existingSubscriptionTerminated(reason: String)
 }
 
 /// A `Publisher` is a provider of a potentially unbounded number of sequenced items, publishing them according to the demand received from its `Subscriber`(s).
+///
 /// - note:
-///   - A `Publisher` can serve multiple `Subscribers` subscribed by `subscribe(Subscriber)` dynamically at various points in time.
-///   - Most publishers can have only one subscriber at a time, but there are specialist publishers and processors (a type of publisher) that handle multiple subscribers simultaneously.
-///   - A publisher is a class that implements this protocol, it is a class because method subscribe modifies *the* publisher, *not* a copy of the publisher.
+///   - A `Publisher` *can* serve multiple `Subscribers` subscribed by `subscribe(Subscriber)` dynamically at various points in time.
+///   - However; *most* publishers can have only one subscriber at a time, but there are specialist publishers and processors (a type of publisher) that handle multiple subscribers simultaneously.
+///   - A publisher is a class that implements this protocol; it is a class because method subscribe modifies *the* publisher, *not* a copy of the publisher.
 ///   - Publishers are typically not thread safe because it makes no sense to share them between threads (they are an alternative to using threads directly).
 public protocol Publisher: AnyObject {
-    /// The type of items this `Publisher` produces.
-    associatedtype PublisherT
+    
+    /// The type of items this `Publisher` produces/outputs.
+    associatedtype OutputT
     
     /// Request this `Publisher` starts streaming items to the given `Subscriber`.
+    ///
     /// - note:
     ///   - This is a "factory method" and can be called multiple times, each time starting a new `Subscription`.
     ///     Most publishers can have only one subscriber at a time, but there are specialist publishers and processors (a type of publisher) that handle multiple subscribers simultaneously.
     ///   - Each `Subscription` will work for only a single `Subscriber`.
     ///   - A `Subscriber` should only subscribe once to a single `Publisher`.
     ///   - If the `Publisher` rejects the subscription attempt it will signal the error via `Subscriber.on(error: PublisherErrors.subscriptionRejected(reason: String))`.
-    ///   Existing subscriptions would continue uninterrupted.
+    ///   Existing subscriptions would continue uninterrupted if an error occures when attempting subsequent subscriptions.
+    ///
     /// - parameter subscriber: The `Subscriber` that will consume items from this `Publisher`.
-    func subscribe<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == PublisherT
+    func subscribe<S>(_ subscriber: S) where S: Subscriber, S.InputT == OutputT
 }
 
-/// `Subscriber` errors that the subscriber reports using its status (typically inherited from `Future`).
-public enum SubscriberErrors: Error {
-    /// Subscription request failed.
-    case tooManySubscriptions(number: Int)
-}
-
-/// Will receive a call to `on(subscribe: Subscriber)` once after passing an instance of `self` to `Publisher.subscribe(Subscriber)` to supply the `Subscription`.
+/// `Subscriber`s consume items from `Producers` once they have established a `Subscription` with the `Producer`.
+///
+/// They will receive a call to `on(subscribe: Subscription)` once after passing an instance of `self` to `Publisher.subscribe(Subscriber)` to supply the `Subscription`.
 ///
 /// No (further) items will be received by this `Subscriber` from the subscribed to `Producer` until `Subscription.request(Int)` is called.
 ///
@@ -70,7 +73,7 @@ public enum SubscriberErrors: Error {
 ///   - Subscribers are typically not thread safe because it makes no sense to share them between threads (they are an alternative to using threads directly).
 public protocol Subscriber: AnyObject {
     /// The type of the items consumed by this `Subscriber`.
-    associatedtype SubscriberT
+    associatedtype InputT
     
     /// Go into the successful terminal state (this method is called by the subscribed to `Producer` when it has no more items left to produce).
     ///
@@ -87,7 +90,7 @@ public protocol Subscriber: AnyObject {
     /// Supply next item produced by the `Publisher` in response to requests to `Subscription.request(Int)` (this method is called by the subscribed to `Publisher` for each of the items requested).
     ///
     /// - parameter next: The next item produced by the subscribed to `Producer`.
-    func on(next: SubscriberT)
+    func on(next: InputT)
     
     /// Invoked by the subscribed to `Publisher`, after this `Subscriber` has called `Publisher.subscribe(self)`.
     ///
@@ -100,6 +103,7 @@ public protocol Subscriber: AnyObject {
 }
 
 /// Operator for stream like flow.
+///
 /// - note:
 //    - Double tilde used because `~>` already defined in the standard library, but without associativity and therefore can't be chained.
 ///   - The wavy line `~~` is reminiscent of both 'S' for subscription and the fact that flow goes up and down.
@@ -115,8 +119,9 @@ infix operator ~~>? : MultiplicationPrecedence
 // Add flow syntax as an extension to `Subscriber` rather than `Publisher`, since the subscriber is returned and therefore the full type information, Self, is available for subsequent stages.
 public extension Subscriber {
     /// Subscribe to the publisher using stream flow syntax.
+    ///
     /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.PublisherT == SubscriberT {
+    @discardableResult public static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.OutputT == InputT {
         left.subscribe(right)
         return right
     }
@@ -124,26 +129,30 @@ public extension Subscriber {
 
 /// Wrap any `Subscriber` in a standard class, useful where `Subscriber` is needed as a type (it is a protocol with associated type and therefore not a type itself but rather a generic constraint).
 ///
-/// EG Implementations of `Subscription` typically contain a reference to the `Subscriber` they belong to and this reference is typed `AnySubscriber` because `Subscriber` cannot be used as a type because it has an associated type `SubscriberT`.
+/// EG Implementations of `Subscription` typically contain a reference to the `Subscriber` they belong to and this reference is typed `AnySubscriber` because `Subscriber` cannot be used as a type because it has an associated type `InputT`.
 ///
 /// - note:
 ///   - In Swift terminology `AnySubscriber` is said to type erase `Subscriber`; meaning that it doesn't matter what type of subscriber is given to `AnySubscriber`'s `init` the result will always be the same type, `AnySubscriber`.
 ///   - For a Java, Scala, Haskell, etc. programmer this terminology is confusing because type erasure in these languages refers to erasing the generic type, in this case `T`, not the main type, in this case `AnySubscriber`.
 ///   - Further confusion for the Java, Scala, Haskell, etc. programmer is that `Subscriber` would be a type and not a generic constraint anyway, therefore `AnySubscriber` would be unnecessary in these languages.
-public final class AnySubscriber<T>: Subscriber {
-    public typealias SubscriberT = T
+///
+/// - parameters
+///   - I: The type of the items consumed (input) by the subscriber.
+public final class AnySubscriber<I>: Subscriber {
+    public typealias InputT = I
     
     private let complete: () -> Void
     
     private let error: (Error) -> Void
     
-    private let next: (T) -> Void
+    private let next: (I) -> Void
     
     private let subscribe: (Subscription) -> Void
     
     /// Wrap the given subscriber, which can be any type of subscriber, so that the type becomes `AnySubscriber` regardless of the originating subscriber's specific type.
+    ///
     /// - parameter subscriber: The subscriber to wrap.
-    public init<S>(_ subscriber: S) where S: Subscriber, S.SubscriberT == T {
+    public init<S>(_ subscriber: S) where S: Subscriber, S.InputT == I {
         complete = {
             subscriber.onComplete()
         }
@@ -166,7 +175,7 @@ public final class AnySubscriber<T>: Subscriber {
         self.error(error)
     }
     
-    public func on(next: T) {
+    public func on(next: I) {
         self.next(next)
     }
     
@@ -189,6 +198,7 @@ public protocol Subscription: AnyObject {
     /// Request the `Publisher` to stop sending data and clean up resources (cancel the subscription).
     ///
     /// Data may still be sent to meet previously signalled demand after calling cancel.
+    ///
     /// - note: Since it is the subscriber that initiates this cancellation the subscriber is not notified, i.e. neither `Subscriber.on(error: Error)` nor `Subscriber.onComplete()` called.
     func cancel()
     
@@ -207,9 +217,28 @@ public protocol Subscription: AnyObject {
     func request(_ n: Int)
 }
 
+/// A failed subscription Singleton, used as the agrument for `Subscriber.on(subscribe:)` when a subscription attempt fails.
+/// The Reactive Stream specification requires that a subscription is provided by `Subscriber.on(subscribe:)` before the error is signalled by `Subscriber.on(error:)`, hence this subscription is used as the argument.
+/// The `cancel` and request` methods of this subscription both do nothing.
+///
+/// - note:
+///   A publisher does not have to provide *this* `Subscription`, it can provide any `Subscription`, when a subscribe attempts fails, however it is convenient to do so.
+public final class FailedSubscription: Subscription {
+    
+    /// The only instance of a `FailedSubscription`.
+    public static let instance = FailedSubscription()
+    
+    private init() {}
+    
+    public func cancel() {}
+    
+    public func request(_ _: Int) {}
+}
+
 /// Functions and properties that are useful in conjunction with Reactive Streams (inside an enum to give them their own namespace).
 public enum ReactiveStreams {
     /// Suggested default buffer size for `Publisher`s and `Subscriber`s.
+    ///
     /// - note: The current implementation is 256.
     public static let defaultBufferSize = 256
 }

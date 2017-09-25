@@ -4,7 +4,7 @@
 A set of types and protocols that build from atomicity (`Atomic`) to futures (`Future`) to Reactive Streams. Futures are built on to of `Atomic` and Reactives Streams on top of futures. All three are useful when writing concurrent programs and the art of sucessfully writing concurrent programs is choosing the most suitable abstraction for the problem. When writing a new concurrent program it is suggested that you start with Reactive Streams, since these are the easiest to use, and only if there are problems consider the other abstractions.
 
 ## Using in your project
-The easiest way to use these types and protocols in your own code is to clone this project from GitHub inside Xcode 9 and then drag the relevant swift files into your project. The files are only small so having a copy shouldn't be an issue (however you will need to manually update). If you just want atomicity then you just need `Atomic.swift`, for futures `Future.swift` *and* `Atomic.swift`, and for reactive collections you need `ReactiveCollection.swift`, `ReactiveStream.swift`, `Future.swift`, *and* `Atomic.swift`.
+The easiest way to use these types and protocols in your own code is to clone this project from GitHub inside Xcode 9 and then drag the relevant swift files into your project. The files are only small so having a copy shouldn't be an issue (however you will need to manually update). If you just want atomicity then you just need `Atomic.swift`, for futures `Future.swift` *and* `Atomic.swift`, and for reactive collections you need `ReactiveCollection.swift`, `ReactiveCollectionBaseClasses.swift`, `ReactiveStream.swift`, `Future.swift`, *and* `Atomic.swift`.
 
 The file `ReactiveStream.swift` just contains the protocols etc. to define a Reactive Stream and can be used to build an implementation of Reactive Streams, one such implementation is `ReactiveCollection.swift`,
 
@@ -114,7 +114,7 @@ Futures are classes and therefore instances would normally be declared using `le
 See `FutureTests.swift` for examples.
 
 ## Reactive Stream
-Reactive Steams are a standardised way to transfer items between asynchronous tasks; they are widely supported in many languages and frameworks and therefore both general and detailed descriptions are available:
+Reactive Steams are a standardised, Actor like, way to transfer items between asynchronous tasks; they are widely supported in many languages and frameworks and therefore both general and detailed descriptions are available:
 
   - [Manifesto](http://www.reactivemanifesto.org)
   - [Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification)
@@ -129,17 +129,27 @@ Reactive Streams are dynamic (can be reconfigured on the fly), can signal errors
   - *`Subscriber`:* Subscribe to a processor and receive from the processor a subscription, using this subscription the subscriber controls the flow of items from the producer to the subscriber.
   - *`Subscription`:* 'Contract' between a producer and subscriber for the supply of items, in particular the subscription regulates the rate of flow of items and signals completion, errors, and cancellation.
 
-The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, their methods, and the function of the methods are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). The implementation in Swift of these protocols in this library faithfully follows the specification, but with Swift naming and type conventions rather than Java naming and type conventions, e.g. in Java the standard specifies:
+The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, which in turn define just seven methods. The methods are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). A summary of how the protocols and methods interact and in what sequence is shown diagramatically:
+
+  [Overview Diagram](ReactiveStreamTimeSequence.pdf)
+
+In practice Reactive Streams are easy to use because their action is largely automated; the programmer declare instances of producers, processors, and subscribers and then arranges for the processors to subscribe to the producers and the subscribers to subscribe to the processors. Using the Reactive Collection Library, described below, the overview diagram referenced above is:
+
+    producer ~~> processor ~~> subscriber
+
+The interactions shown in the diagram occur automatically once subscriptions are established, via the `~~>` operator.
+
+The implementation in Swift of these protocols faithfully follows the Java specification, but with Swift naming and type conventions, e.g. in Java the standard specifies:
 
     interface Subscriber<T> {
         void onError(Throwable t);
         ...
     }
         
-and in this version for Swift (there is no Swift standard) this becomes:
+and in Swift this becomes:
         
     protocol Subscriber {
-        associatedType SubscriberItem
+        associatedType InputT
         func on(error: Error)
         ...
     }
@@ -147,27 +157,52 @@ and in this version for Swift (there is no Swift standard) this becomes:
 This is similar to how Objective-C and C APIs are 'translated' when imported into Swift.
 
 ## Reactive Collection
-On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. These implementations are styled after the standard Swift collection library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceSubscriber` and the arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceSubscriber` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
+On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. These implementations are styled after the standard Swift Collection Library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceSubscriberFuture`:
 
-Subscribers, as well as conforming to `Subscribe`, also extend `Future` and are therefore a type of future (see above). The `get`, `cancel`, and `status` methods from `Future` behave as expected. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
+  - The arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceSubscriberFuture` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
+  - Like the Swift Collection Library the action of these classes is specified using a trailing closure, e.g. `ReduceSubscriberFuture`'s trailing closure accumulates the results.
+  - There is a logical naming convention going from most important to least important part of the name left to right of `[<SwiftCollectionName> | <Other>][Producer | Processor | Subscriber][Future]?[Seeded]?`, where:
+  
+    - `<SwiftCollectionName> | <Other>`: The method/ptotocol name of the nearest equivalent in the Swift Collection Library (e.g. `forEach` from `Sequence` for `ForEachProducer`) or another name if nothing is suitable (e.g. `ClockedForkProcessor`). The `Other` part-name ends in `ForkProcessor` for processors that fork a single flow into multiple and in `JoinProcessor` for the reverse of joing multiple flows into one.
+    - `Producer | Processor | Subscriber`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`.
+    - `Future`: *If* the class is also a `Future`; e.g. `ReduceSubscriberFuture` which gives access to the result of the reduction using  future's interface, in particular `get` or `~~>?`.
+    - `Seeded`: Is appended to the name *if* the constructor has an `initialSeed` argument that is not present in the equivalent Swift Collection method. The seed is used as working storage for the trailing closure and is passed in as an `inout` parameter. EG `IteratorProducerSeeded` passes its seed to its `nextItem` closure, the equivalent in Swift's Collection Library is `IteratorProtocol` which would be implemented in a `struct`/`class` and the implementation would provide the storage instead of seed. 'Seeded' is styled after the Swift Collection `reduce(into: initialResult) { ... }` method, where the `into` argument is in this case both the seed and the final rersult.
+
+Reactive Collections are easy to use, since the client programmer makes instances of the classes and then joins these instances together using the `subscribe` method or `~~>` operator (see below). The other methods defined by the Reactive Stream API are not used by the client programmer, but by the library automatically. Some `Subscriber`s also extend `Future` and the  `get`, `cancel`, and `status` methods from `Future` provide client interaction. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
 
 To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined; that is two tildes (not minus) followed by  greater-than. This was chosen because the tilde looks like an 's' on its side and the operator establishes a subscription, because the tilde is wavy and therefore represents dynamic flow, and because the greater-than indicates the direction of flow.
 
 Hello World using this library is:
 
     let helloWorldPublisher = ForEachPublisher(sequence: "Hello, world!".characters)
-    let helloWorldSubscriber = ReduceSubscriber(into: "") { (result: inout String, next: Character) in
+    let helloWorldSubscriber = ReduceSubscriberFuture(into: "") { (result: inout String, next: Character) in
         result.append(next)
     }
     var helloWorldResult = "Failed!"
     helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
 
-Note how the arguments to `ForEachProducer` and `ReduceSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
+Note how the arguments to `ForEachProducer` and `ReduceSubscriberFuture` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
+
+The Reactive Stream standard, see above, defines seven methods, however only one of these methods, `subscribe`, is used by a programmer using a Reactive Stream Library (using the other methods is an error). Therefore it is preferable to use `~~>` instead of `subscribe`, since this habituates the progrgrammer away from calling methods on Reactive Streams.
 
 See `ReativeCollectionTests.swift` for examples.
 
-## Reactive Collection Base Classes
-Typically you use the sequence like classes, `ForEachProducer`, `ReduceSubscriber`, etc., from Reactive Collection, however base classes are provided for simplifying writing your own Reactive Stream implementations: `IteratingPublisher` , `BaseSubscriber`,  `AnyBaseSubscriber`,  `AccumulatingSubscriber`, `InlineProcessor`, etc.
+## Reactive Collection Bases
+Typically you use the sequence like classes, `IteratorPublisherSeeded`, `ForEachPublisher`, `ReduceSubscriberFuture`, etc., from the Reactive Collection Library. However an alternative to these are the base protocols/classes provided by the Reactive Collection Bases Library. These protocols/classes:
+
+  - Simplify writing your own Reactive Stream implementations.
+  - Can be used as an alternative to the sequence like classes by inheriting/subclassing.
+  - These classes are the base protocol/classes for the classes provided by the Reactive Collection Library described above.
+  - Are abstract protocols/classes and require implementing/sub-classing, see description of protocols/classes to see which methods require implementing/overridding. Swift 4 does not have the concept of an abstract class and therefore default implementations for classes throw a fatal error. Also there is no concept in Swift 4 of protected access therefore the methods to overrride in classes have `open` access. When using a sub-class of these base clases it is safer to use the operator `~~>` and not call the methods directly since this will prevent the error of calling a method that ideally would be protected accidently.
+  - There is a logical naming convention going from most important to least important part of the name left to right, similar to that of the Reactive Collection Library described above, of `[<SwiftCollectionName> | <Other>]?[Producer | Processor | Subscriber][Future]?[Class]?[Base]` where:
+  
+    - `<SwiftCollectionName> | <Other>`: The method/ptotocol name of the nearest equivalent in the Swift Collection Library (e.g. `Iterator` from `IteratorProtocol` for `IteratorProducerBase`), another name if nothing is suitable in the Swift Collection Library (e.g. `InlineProcessorBase`), or nothing if the class is not specialised in and way (e.g. `SubscriberBase`).  The `Other` part-name ends in `ForkProcessor` for processors that fork a single flow into multiple and in `JoinProcessor` for the reverse of joing multiple flows into one.
+    - `Producer | Processor | Subscriber`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`.
+    - `Future`: *If* the class is also a `Future`; e.g. `SubscriberFutureBase` which gives access to the result of the subscription using  future's interface, in particular `get` or `~~>?`.
+    - `Class`: *If* the base is a class rather than a protocol then the name has `Class` as its 2nd last element, e.g. `IteratorProducerClassBase`. (These would be abstract classes in other languages, but Swift doesn't have abstract classes. Similarly default implementations of methods that must be overridden throw a fatal exception because there are no abstract methods in Swift.)
+    - `Base`: All the names end in `Base` to indicate that the protocol/class is 'abstract' and requires implementing/sub-classing.
+    
+    Where these protocols/classes introduce new methods and properties their names begin with `_`; treat these as protected methods, i.e. do not call them - they are part of the library. (Swift doesn't have the concept of a protected method. Similarly if the method is in a protocol there is no way to mark it as final, therefore read the documentation carefully to decide if it is suitable for overridding. Conversely if the method is defined in a class there is no way to mark it as abstract and so methods that would be abstract throw a fatal error.)
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.

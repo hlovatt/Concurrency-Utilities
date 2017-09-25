@@ -12,7 +12,8 @@
 		760DB1641F5E933D00C5F08E /* AtomicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB1631F5E933D00C5F08E /* AtomicTests.swift */; };
 		760DB1661F5E935B00C5F08E /* FutureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 760DB1651F5E935B00C5F08E /* FutureTests.swift */; };
 		7649BF811F6DF98D009EFF15 /* ReactiveCollection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7649BF801F6DF98D009EFF15 /* ReactiveCollection.swift */; };
-		7649BF831F6F9E4C009EFF15 /* ReactiveCollectionBaseClasses.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7649BF821F6F9E4C009EFF15 /* ReactiveCollectionBaseClasses.swift */; };
+		7649BF831F6F9E4C009EFF15 /* ReactiveCollectionBases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7649BF821F6F9E4C009EFF15 /* ReactiveCollectionBases.swift */; };
+		7649BF871F713522009EFF15 /* ReactiveStreamTimeSequence.pdf in Resources */ = {isa = PBXBuildFile; fileRef = 7649BF861F713522009EFF15 /* ReactiveStreamTimeSequence.pdf */; };
 		7678E28B1F5D1B2500FE6D0B /* Concurrency_Utilities.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */; };
 		7678E2901F5D1B2500FE6D0B /* ReactiveCollectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7678E28F1F5D1B2500FE6D0B /* ReactiveCollectionTests.swift */; };
 		7678E2921F5D1B2500FE6D0B /* Concurrency_Utilities.h in Headers */ = {isa = PBXBuildFile; fileRef = 7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -35,7 +36,8 @@
 		760DB1631F5E933D00C5F08E /* AtomicTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AtomicTests.swift; sourceTree = "<group>"; };
 		760DB1651F5E935B00C5F08E /* FutureTests.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FutureTests.swift; sourceTree = "<group>"; };
 		7649BF801F6DF98D009EFF15 /* ReactiveCollection.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ReactiveCollection.swift; sourceTree = "<group>"; };
-		7649BF821F6F9E4C009EFF15 /* ReactiveCollectionBaseClasses.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ReactiveCollectionBaseClasses.swift; sourceTree = "<group>"; };
+		7649BF821F6F9E4C009EFF15 /* ReactiveCollectionBases.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ReactiveCollectionBases.swift; sourceTree = "<group>"; };
+		7649BF861F713522009EFF15 /* ReactiveStreamTimeSequence.pdf */ = {isa = PBXFileReference; lastKnownFileType = image.pdf; path = ReactiveStreamTimeSequence.pdf; sourceTree = "<group>"; };
 		766492EA1F5E070E00BAC14B /* LICENSE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = LICENSE.md; sourceTree = "<group>"; };
 		7678E2811F5D1B2500FE6D0B /* Concurrency_Utilities.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Concurrency_Utilities.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Concurrency_Utilities.h; sourceTree = "<group>"; };
@@ -71,6 +73,7 @@
 			children = (
 				7678E29D1F5D2CD500FE6D0B /* README.md */,
 				766492EA1F5E070E00BAC14B /* LICENSE.md */,
+				7649BF861F713522009EFF15 /* ReactiveStreamTimeSequence.pdf */,
 				7678E2831F5D1B2500FE6D0B /* Concurrency Utilities */,
 				7678E28E1F5D1B2500FE6D0B /* Concurrency UtilitiesTests */,
 				7678E2821F5D1B2500FE6D0B /* Products */,
@@ -93,7 +96,7 @@
 				760DB15F1F5E5B2500C5F08E /* Future.swift */,
 				760DB1611F5E917C00C5F08E /* ReactiveStream.swift */,
 				7649BF801F6DF98D009EFF15 /* ReactiveCollection.swift */,
-				7649BF821F6F9E4C009EFF15 /* ReactiveCollectionBaseClasses.swift */,
+				7649BF821F6F9E4C009EFF15 /* ReactiveCollectionBases.swift */,
 				7678E2841F5D1B2500FE6D0B /* Concurrency_Utilities.h */,
 				7678E2851F5D1B2500FE6D0B /* Info.plist */,
 			);
@@ -205,6 +208,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7649BF871F713522009EFF15 /* ReactiveStreamTimeSequence.pdf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,7 +228,7 @@
 			files = (
 				760DB1601F5E5B2500C5F08E /* Future.swift in Sources */,
 				7678E29C1F5D1DE500FE6D0B /* Atomic.swift in Sources */,
-				7649BF831F6F9E4C009EFF15 /* ReactiveCollectionBaseClasses.swift in Sources */,
+				7649BF831F6F9E4C009EFF15 /* ReactiveCollectionBases.swift in Sources */,
 				7649BF811F6DF98D009EFF15 /* ReactiveCollection.swift in Sources */,
 				760DB1621F5E917C00C5F08E /* ReactiveStream.swift in Sources */,
 			);

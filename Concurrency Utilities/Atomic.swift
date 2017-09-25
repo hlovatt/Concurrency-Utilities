@@ -8,9 +8,28 @@
 
 import Foundation
 
+/// Gives a unique number.
+/// Useful for inique identifiers.
+///
+/// - note: An `enum` is used as a namespace since that is the nearest available in Swift.
+public enum UniqueNumber {
+    private static var uniqueNumber = Int.min
+    
+    /// The next unique number.
+    public static var next: Int {
+        defer {
+            uniqueNumber += 1
+        }
+        return uniqueNumber
+    }
+}
+
 /// Gives atomic get/set/update to its value.
+///
+/// - parameters
+///   - T: The type of the value.
 public final class Atomic<T> {
-    private var queue: DispatchQueue!
+    private var queue: DispatchQueue
     
     private var _value: T
     
@@ -18,10 +37,11 @@ public final class Atomic<T> {
     /// - parameter initialValue: The initial value of the variable.
     public init(_ initialValue: T) {
         _value = initialValue
-        queue = DispatchQueue(label: "Atomic Serial Queue \(ObjectIdentifier(self))", qos: DispatchQoS.userInitiated)
+        queue = DispatchQueue(label: "Atomic Serial Queue \(UniqueNumber.next)", qos: DispatchQoS.userInitiated)
     }
     
     /// Atomically get and set the value.
+    ///
     /// - note: See `update` for getting and then setting the value atomically.
     public var value: T {
         get {
@@ -39,9 +59,11 @@ public final class Atomic<T> {
     }
     
     /// Atomically update the value (get then set value in one operation guaranteeing no `get`s, `set`s, or `update`s from other threads in between).
+    ///
     /// - parameters:
     ///   - updater: A closure that accepts the current value and returns the new value.
     ///   - oldValue: The old value supplied to given updater.
+    ///
     /// - returns: The updated value (which can be ignored).
     @discardableResult public func update(updater: (_ oldValue: T) -> T) -> T {
         var result: T? = nil
