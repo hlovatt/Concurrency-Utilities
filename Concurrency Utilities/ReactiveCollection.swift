@@ -42,15 +42,14 @@ public final class IteratorSeededPublisher<S, O>: IteratorPublisherClassBase<O> 
     ///
     /// - parameters:
     ///   - qos: Quality of service for the dispatch queue used to sequence items and produce items in the background (default `DispatchQOS.default`).
-    ///   - bufferSize: This is a standard argument to Reactive Stream types, in this case the argument doesn't define the buffer size but rather the number of items produced before testing for subscription cancellation (default `ReactiveStreams.defaultBufferSize`).
     ///   - initialSeed: The value of the seed at the start of each iteration cycle.
     ///   - nextItem: A closure that produces the next item, or `nil` to indicate termination, given the seed (which it can modify)
     ///   - seed: The seed passed to the `nextItem` closure as an `inout` parameter so that the closure can modify the seed.
-    public init(qos: DispatchQoS = .default, bufferSize: Int = ReactiveStreams.defaultBufferSize, initialSeed: S, nextItem: @escaping (_ seed: inout S) throws -> O?) {
+    public init(qos: DispatchQoS = .default, initialSeed: S, nextItem: @escaping (_ seed: inout S) throws -> O?) {
         self.initialSeed = initialSeed
         seed = initialSeed
         self.nextItem = nextItem
-        super.init(qos: qos, bufferSize: bufferSize)
+        super.init(qos: qos)
     }
     
     /// Calls `nextItem(&seed)`.
@@ -76,7 +75,6 @@ public final class IteratorSeededPublisher<S, O>: IteratorPublisherClassBase<O> 
 ///
 /// - note:
 ///   - Each subscriber receives all of the sequence individually, i.e. each subscriber receives the whole sequence (provided that the given sequence supports multiple traversal).
-///   - This class does not use buffering, because the buffer is the given sequence.
 ///   - When created the given sequence is copied, therefore any changes to the sequence made after the publisher is created are *not* reflected in the items produced (the copy of the sequence is made at creation time not subscription time).
 ///
 /// - parameters
@@ -91,10 +89,9 @@ public final class ForEachPublisher<O>: IteratorPublisherClassBase<O> {
     /// - parameters:
     ///   - sequence: The sequence of items produced (one sequence per subscription assuming that the sequence can be traversed multiple times).
     ///   - qos: Quality of service for the dispatch queue used to sequence items and produce items in the background (default `DispatchQOS.default`).
-    ///   - bufferSize: This is a standard argument to Reactive Stream types, in this case the argument doesn't define the buffer size but rather the number of items produced before testing for subscription cancellation (default `ReactiveStreams.defaultBufferSize`).
-    public init<S>(sequence: S, qos: DispatchQoS = .default, bufferSize: Int = ReactiveStreams.defaultBufferSize) where S: Sequence, S.SubSequence: Sequence, S.Iterator.Element == O, S.SubSequence.SubSequence == S.SubSequence, S.SubSequence.Iterator.Element == O {
+    public init<S>(sequence: S, qos: DispatchQoS = .default) where S: Sequence, S.SubSequence: Sequence, S.Iterator.Element == O, S.SubSequence.SubSequence == S.SubSequence, S.SubSequence.Iterator.Element == O {
         self.sequence = AnySequence(sequence)
-        super.init(qos: qos, bufferSize: bufferSize)
+        super.init(qos: qos)
     }
     
     private var iterator: AnyIterator<O>!
@@ -184,7 +181,7 @@ public final class ReduceFutureSubscriber<T, R>: FutureSubscriberClassBase<T, R>
 
 // MARK: `Processors`s.
 
-/// A `Processor` that takes input items from its input subscription maps (a.k.a. processes, a.k.a. transforms) them into output items, using its seed, and outputs them and to its output subscriber (Reactive Stream version of `Sequence.map(_ transform:)`).
+/// A `Processor` that takes input items from its input subscription and maps (a.k.a. processes, a.k.a. transforms) them into output items, using its seed (Reactive Stream version of `Sequence.map(_ transform:)`).
 ///
 /// - warning:
 ///   - `processors`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
@@ -193,33 +190,31 @@ public final class ReduceFutureSubscriber<T, R>: FutureSubscriberClassBase<T, R>
 ///
 /// - parameters
 ///   - S: The type of the seed accepted by the given transform closure.
-///   - T: The type of the elements subscribed to.
-///   - R: The result type of the accumulation.
-public final class MapSeededProcessor<S, I, O>: MapProcessorClassBase<I, O> {
+///   - I: The type of the input elements subscribed to.
+///   - O: The output type after the mapping.
+public final class MapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
     private let initialSeed: S
     
     private let transformClosure: (inout S, I) throws -> O
     
     private var seed: S
     
-    /// A `Processor` that takes input items from its input subscription maps (a.k.a. processes, a.k.a. transforms) them into output items, using its seed, and outputs them and to its output subscriber (Reactive Stream version of `Sequence.map(_ transform:)`).
+    /// A `Processor` that takes input items from its input subscription and maps (a.k.a. processes, a.k.a. transforms) them into output items, using its seed (Reactive Stream version of `Sequence.map(_ transform:)`).
     ///
     /// - parameters:
     ///   - initialSeed: The initial value of the seed at the start of new input and output subscription.
-    ///   - transform: The mapping/processing transform that converts an input item intop an output item.
+    ///   - transform: The mapping/processing transform that converts an input item into an output item.
     public init(initialSeed: S, transform: @escaping (_ seed: inout S, _ nextItem: I) throws -> O) {
         self.initialSeed = initialSeed
         seed = initialSeed
         transformClosure = transform
     }
     
-    /// Calls the transform closure with the seed and the given input item.
+    /// Calls the transform closure with the seed and the given input item and passes the resulting transformed item onto the output susbcription.
     ///
     /// - parameter inputItem: The input item to be transformed/mapped/processed.
-    ///
-    /// - returns: The transformed/mapped/processed input item.
-    public override func _map(_ inputItem: I) throws -> O {
-        return try transformClosure(&seed, inputItem)
+    public override func _consumeAndRequest(item: I) throws {
+        _outputSubscriber.value?.on(next: try transformClosure(&seed, item))
     }
     
     /// Resets the seed at the start of each new output subscription.
@@ -227,3 +222,53 @@ public final class MapSeededProcessor<S, I, O>: MapProcessorClassBase<I, O> {
         seed = initialSeed
     }
 }
+
+/// A `Processor` that takes input items from its input subscription and maps (a.k.a. processes, a.k.a. transforms) them into *non-`nil`* output items (Reactive Stream version of `Sequence.flatMap(_ transform:)`).
+///
+/// - warning:
+///   - `processors`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///   - There are *no* `Publisher` methods/properties intended for use by a client (the programmer using an instance of this class), the client *only* passes the instance to the `subscribe` method of a `Publisher`.
+///   Passing the instance to the publisher is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
+///
+/// - parameters
+///   - S: The type of the seed accepted by the given transform closure.
+///   - I: The type of the input elements subscribed to.
+///   - O: The output type after the mapping.
+public final class FlatMapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
+    private let initialSeed: S
+
+    private let transformClosure: (inout S, I) throws -> O?
+
+    private var seed: S
+
+    /// A `Processor` that takes input items from its input subscription and maps (a.k.a. processes, a.k.a. transforms) them into *non-`nil`* output items (Reactive Stream version of `Sequence.flatMap(_ transform:)`).
+    ///
+    /// - parameters:
+    ///   - initialSeed: The initial value of the seed at the start of new input and output subscription.
+    ///   - transform:
+    ///     The mapping/processing transform that converts an input item into an *optional* output item.
+    ///     If the transformed/mapped/processed item is `nil`, it is disguarded.
+    public init(initialSeed: S, transform: @escaping (_ seed: inout S, _ nextItem: I) throws -> O?) {
+        self.initialSeed = initialSeed
+        seed = initialSeed
+        transformClosure = transform
+    }
+
+    /// Calls the transform closure with the seed and the given input item and passes the resulting transformed item onto the output susbcription assuming that it isn't `nil`, if it is `nil` it requests an extra input item.
+    ///
+    /// - parameter inputItem: The input item to be transformed/mapped/processed.
+    public override func _consumeAndRequest(item: I) throws {
+        let outputItemOptional = try transformClosure(&seed, item)
+        guard let outputItem = outputItemOptional else {
+            _inputSubscription.value?.request(1)
+            return
+        }
+        _outputSubscriber.value?.on(next: outputItem)
+    }
+
+    /// Resets the seed at the start of each new output subscription.
+    public override func _resetOutputSubscription() {
+        seed = initialSeed
+    }
+}
+

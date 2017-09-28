@@ -78,7 +78,7 @@ public extension PublisherBase {
 /// Base protocol for publishers that are like an iterator; it has a `next` method (that must be provided) that produces items and signals last item with `nil`.
 ///
 /// - warning:
-///   - When a subscriber subscribes to a class implementing this protocol it is passed `self` (because this protocol is its own subscription).
+///   - When a subscriber subscribes successfully to a class implementing this protocol it is passed `self` (because this protocol is its own subscription).
 ///     Therefore each subscriber has to `nil` out its reference to the subscription when it receives either `on(error: Item)` or `onComplete()`, otherwise there will be a retain cycle memory leak.
 ///   - The *only* method/property intended for use by a client (the programmer using an instance of this protocol) is method `subscribe`; which is best called using operator `~~>` since that emphasizes that the other methods are not for client use.
 ///   - If either methods `cancel` or `request` (from `Subscription`) are called when there is no subscriber the result is a fatal error.
@@ -86,12 +86,8 @@ public extension PublisherBase {
 ///   - This class is not thread safe (it makes no sense to share a producer since Reactive Streams are an alternative to dealing with threads directly!).
 ///
 /// - note:
-///   - Each subscriber receives all of the items individually (provided that the iterator supports multiple traversal).
+///   - Each subscriber receives all of the items individually (provided that the `next` method supports multiple traversal).
 ///   - This class does not provide buffering, but a derived class might.
-///     However, the given `bufferSize` is used to control how responsive cancellation is because cancellation is checked at least each `bufferSize` items produced.
-///
-/// - parameters
-///   - T: The type of the items produced.
 public protocol IteratorPublisherBase: PublisherBase, Subscription {
     /// Produces next item or `nil` if no more items.
     ///
@@ -104,14 +100,11 @@ public protocol IteratorPublisherBase: PublisherBase, Subscription {
     /// Holds the subscriber, if there is one (inside an `Atomic` because thread safety is needed).
     var _outputSubscriber: Atomic<AnySubscriber<OutputT>?> { get }
     
-    /// This is a standard property of Reactive Streams; in this case the property doesn't define the buffer size but rather the number of items produced before testing for subscription cancellation.
-    var _outputBufferSize: Int { get }
-    
     /// The queue used to sequence item production.
     var _outputDispatchQueue: DispatchQueue { get }
     
-    /// The `producing` tasks are `Future`s, to allow cancellation, and inside a dictionary indexed with a unique number, producer number, to allow them to be both indivdually and *en masse* cancelled and deleted.
-    var _outputProducers: [Int : Future<Void>] { get set }
+    /// Number of additional items requested but not yet in production.
+    var _additionalRequestedItems: Atomic<Int> { get }
     
     /// Called to request `n` more items to be produced.
     /// Schedules the production of items in blocks of upto `bufferSize` units.
@@ -147,35 +140,40 @@ public extension IteratorPublisherBase {
                 outputSubscriber.on(error: PublisherErrors.cannotProduceRequestedNumberOfItems(numberRequested: n, reason: "Negative number of items not allowed."))
                 return nil  // Completed.
             }
-            let thisProducersNumber = UniqueNumber.next
-            let producer = AsynchronousFuture(queue: self._outputDispatchQueue) { isTerminated throws -> Void in
-                var count = n
-                while count > 0 {
-                    try isTerminated()
-                    let innerLimit = min(self._outputBufferSize, count)
-                    var innerCount = innerLimit
-                    do {
-                        while innerCount > 0, let item = try self._next() {
-                            outputSubscriber.on(next: item)
-                            innerCount -= 1
+            _additionalRequestedItems.update { old in
+                guard old == 0 else { // Check if need to start a new production run, i.e. old == 0.
+                    return old + n // Coalesce outstanding requests.
+                }
+                func producer(numberOfItems: Int) -> () -> Void {
+                    return {
+                        var count = numberOfItems
+                        do {
+                            while count > 0, let item = try self._next() {
+                                outputSubscriber.on(next: item)
+                                count -= 1
+                            }
+                        } catch {
+                            outputSubscriber.on(error: error) // Report an error from next method.
+                            self.cancel() // Cancel remaining queued production and mark this subscription as complete.
+                            return
                         }
-                    } catch {
-                        outputSubscriber.on(error: error) // Report an error from next method.
-                        self._outputProducers.removeValue(forKey: thisProducersNumber) // This producer has finished.
-                        self.cancel() // Cancel remaining queued production and mark this subscription as complete.
-                        return
+                        guard count == 0 else { // Complete because `_next` must have returned `nil` and hence `count > 0`?
+                            outputSubscriber.onComplete() // Tell subscriber that subscription is completed.
+                            self.cancel() // Cancel remaining production and mark this subscription as complete.
+                            return
+                        }
+                        self._additionalRequestedItems.update { current in
+                            let outstanding = current - numberOfItems
+                            if outstanding > 0 {
+                                self._outputDispatchQueue.async(execute: producer(numberOfItems: outstanding))
+                            }
+                            return outstanding // Producing all the requested items.
+                        }
                     }
-                    count = innerCount > 0 ?
-                        -1 :
-                        count - innerLimit
                 }
-                self._outputProducers.removeValue(forKey: thisProducersNumber) // This producer has finished.
-                if count < 0 { // Complete?
-                    outputSubscriber.onComplete() // Tell subscriber that subscription is completed.
-                    self.cancel() // Cancel remaining queued production and mark this subscription as complete.
-                }
+                _outputDispatchQueue.async(execute: producer(numberOfItems: n))
+                return n // Producing all the requested items.
             }
-            _outputProducers[thisProducersNumber] = producer
             return outputSubscriberOptional
         }
     }
@@ -184,10 +182,7 @@ public extension IteratorPublisherBase {
     /// Items are produced in upto `bufferSized` blocks and the current block will keep producing items after cancelleation, but a scheduled but unstarted block will be cancelled.
     func cancel() {
         _outputSubscriber.update { _ in
-            for producer in self._outputProducers.values {
-                producer.cancel() // Cancel item production from queued producer.
-            }
-            _outputProducers.removeAll()
+            _additionalRequestedItems.value = 0
             return nil // Mark subscription as completed.
         }
     }
@@ -204,19 +199,15 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
     
     public let _outputSubscriber = Atomic<AnySubscriber<O>?>(nil)
     
-    public let _outputBufferSize: Int
-    
     private(set) public var _outputDispatchQueue: DispatchQueue
     
-    public var _outputProducers = [Int : Future<Void>]()
+    public let _additionalRequestedItems = Atomic(0)
     
     /// A convenience class for implementing `IteratorPublisherBase`; it provides all the stored properties.
     ///
     /// - parameters:
     ///   - qos: Quality of service for the dispatch queue used to sequence items and produce items in the background (default `DispatchQOS.default`).
-    ///   - bufferSize: This is a standard argument to Reactive Stream types, in this case the argument doesn't define the buffer size but rather the number of items produced before testing for subscription cancellation (default `ReactiveStreams.defaultBufferSize`).
-    public init(qos: DispatchQoS = .default, bufferSize: Int = ReactiveStreams.defaultBufferSize) {
-        _outputBufferSize = bufferSize
+    public init(qos: DispatchQoS = .default) {
         _outputDispatchQueue = DispatchQueue(label: "IteratorPublisherClassBase Serial Queue \(UniqueNumber.next)", qos: qos)
     }
     
@@ -325,7 +316,7 @@ public extension SubscriberBase {
             case .cancelInputSubscriptionAndComplete:
                 _inputSubscription.update { inputSubscriptionOptional in
                     guard let inputSubscription = inputSubscriptionOptional else {
-                        return nil // Already finished.
+                        return nil // Already finished. Can't think how to test this!
                     }
                     inputSubscription.cancel()
                     _handleInputSubscriptionOnComplete()
@@ -612,24 +603,12 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
 ///   - The associated types are:
 ///     - InputT: The type of the input items.
 ///     - OutputT: The type of the output items.
-public protocol MapProcessorBase: Processor, SubscriberBase, PublisherBase, Subscription {
-    /// Takes given input item and processes it into an outut item.
-    ///
-    /// - parameter inputItem: The input item to be processed.
-    ///
-    /// - returns: The processed input item.
-    func _map(_ inputItem: InputT) throws -> OutputT
-}
+public protocol ProcessorBase: Processor, SubscriberBase, PublisherBase, Subscription {}
 
-public extension MapProcessorBase {
+public extension ProcessorBase {
     /// Default returns self since `ProcessorBase` is its own `Subscription`.
     public var _outputSubscription: Subscription {
         return self
-    }
-    
-   /// Default implementation `process`es the input `item` from the input subscription and passes it onto the output subscription.
-    func _consumeAndRequest(item: InputT) throws {
-        _outputSubscriber.value?.on(next: try _map(item))
     }
     
     /// Default implementation terminates the existing input subscription, if there is one, with error `PublisherErrors.existingSubscriptionTerminated(reason: "...")`.
@@ -681,14 +660,14 @@ public extension MapProcessorBase {
     }
 }
 
-/// A convenience class for implementing `MapProcessorBase`; it provides all the stored properties.
+/// A convenience class for implementing `ProcessorBase`; it provides all the stored properties.
 ///
 /// - warning: `map` must be overridden because the default implementation throws a fatal error.
 ///
 /// - parameters
 ///   - I: The type of the input items to be processed.
 ///   - O: The type of the output items produced.
-open class MapProcessorClassBase<I, O>: MapProcessorBase {
+open class ProcessorClassBase<I, O>: ProcessorBase {
     /// The input item's type.
     public typealias InputT = I
     
@@ -701,9 +680,13 @@ open class MapProcessorClassBase<I, O>: MapProcessorBase {
     /// The input subscription, if there is one.
     public let _inputSubscription = Atomic<Subscription?>(nil)
     
-    /// Mapping function; must be overridden, default implementation throws fatal error.
-    open func _map(_ inputItem: I) throws -> O {
-        fatalError("Must override method `_map`.") // Can't test fatal error.
+    /// Takes the next item from the subscription and if necessary requests more items from the subscription.
+    ///
+    /// - warning: Must be overridden, default throws a fatal error.
+    ///
+    /// - parameter item: The next item.
+    open func _consumeAndRequest(item: I) throws {
+        fatalError("Must be overridden.") // Can't test a fatal error!
     }
     
     /// Resets the output subscription when a new output subscription starts, default implementation does nothing.

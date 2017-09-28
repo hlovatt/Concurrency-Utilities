@@ -158,7 +158,7 @@ This is similar to how Objective-C and C APIs are 'translated' when imported int
 
 ## Reactive Collection
 ### Introduction
-On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. The reactive collections run asynchronously and provide locking and background threads without the need for the user of the library to deal with threads manually; but they are not themselves thread safe since it makes no snese to share them between threads, you use them instead of threads. These implementations are styled after the standard Swift Collection Library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceFutureSubscriber`:
+On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. The reactive collections run asynchronously and provide locking and background threads without the need for the user of the library to deal with threads/locking manually; but they are not themselves thread safe since it makes no snese to share them between threads, you use them instead of threads! These implementations are styled after the standard Swift Collection Library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceFutureSubscriber`:
 
   - The arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceFutureSubscriber` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
   - Like the Swift Collection Library the action of these classes is specified using a trailing closure, e.g. `ReduceFutureSubscriber`'s trailing closure accumulates the results.
@@ -169,9 +169,9 @@ On top of the specification's protocols the library provides implementations of 
     - `Seeded`: Is appended to the name *if* the constructor has an `initialSeed` argument that is not present in the equivalent Swift Collection method. The seed is used as working storage for the trailing closure and is passed in as an `inout` parameter. EG `IteratorProducerSeeded` passes its seed to its `nextItem` closure, the equivalent in Swift's Collection Library is `IteratorProtocol` which would be implemented in a `struct`/`class` and the implementation would provide the storage instead of seed. 'Seeded' is styled after the Swift Collection `reduce(into: initialResult) { ... }` method, where the `into` argument is in this case both the seed and the final rersult.
     - `Producer | Processor | Subscriber | ForkProcessor | JoinProcessor`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`. `ForkProcessor` are processors that fork a single stream into multiple and  `JoinProcessor` are the reverse of joing multiple streams into one (`Fork`s and `Join`s are always `Processors` because they have, by definition, an input and an output).
 
-Reactive Collections are easy to use, since the client programmer makes instances of the classes and then joins these instances together using the `subscribe` method or `~~>` operator (see below). The other methods defined by the Reactive Stream API are not used by the client programmer; but by the library *automatically*. Some `Subscriber`s also extend `Future` and the  `get`, `cancel`, and `status` methods from `Future` provide client interaction. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
+Reactive Collections are easy to use, since the client programmer makes instances of the Reactive Collection classes and then joins these instances together using the `subscribe` method or `~~>` operator (see below). The other methods defined by the Reactive Stream API are not used by the client programmer; but by the library *automatically*. Some `Subscriber`s also extend `Future` and the  `get`, `cancel`, and `status` methods from `Future` provide client interaction. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
 
-To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined; that is two tildes (not minus) followed by  greater-than. This was chosen because the tilde looks like an 's' on its side and the operator establishes a subscription, because the tilde is wavy and therefore represents dynamic flow, and because the greater-than indicates the direction of flow. The operator `~~>` is prefered over method `subscribe` because it habituates the programmer away from method calls which as stated above are mainly not for programmer use.
+To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined; that is two tildes (not minus) followed by  greater-than. This was chosen because the tilde looks like an 's' on its side and the operator establishes a subscription, because the tilde is wavy and therefore represents dynamic flow, and because the greater-than indicates the direction of flow. The operator `~~>` is prefered over method `subscribe` because it habituates the programmer away from method calls which as stated above are mainly not for programmer use. For the same reason, it is recommended that `~~>?` etc. are used with `Subscriber`s that are `Future`s also.
 
 ### Hello World (Publishers and Subscribers)
 Hello World using this library is:
@@ -183,7 +183,9 @@ Hello World using this library is:
     var helloWorldResult = "Failed!"
     helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
 
-Note how the arguments to `ForEachProducer` and `ReduceFutureSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting. `helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`).
+Note how the arguments to `ForEachProducer` and `ReduceFutureSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
+
+`helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`). `Publisher`s produce items in the background via Grand Central Dispartch (GCD) queues and the items are passed to and processed by subsequent stages in the thread processing the queued production task. The production of items per task is specified by the *subscribers* `bufferSize` argument, since it is the subscriber that requests items to be produced. The quality of service expected from the producer's queue can be specified when constructing the producer.
 
 ### Processors
 Typically you would have intermediate stages in a calculation, `Processor`s that take an input and produce an output (these are similar to `Sequence`'s `map` and `filter` methods). The Monte Carlo method of approximating Pi estimates the ratio of the area of a square to the area of an arc. Consider a square piece of paper 1 by 1, i.e. both x and y ordinates run from 0 to 1,  with an arc drawn with centre at (0, 0) from (0, 1) to (1, 0), i.e. it has a radius of 1. If darts are randomly thrown at the paper then approximately the ratio of arc area / square area is the number of darts inside arc / total number of darts. From which Pi can be approximated as 4 times the area ratio. Using the Reactive Collection Library this is:
@@ -240,11 +242,9 @@ Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEach
     Where these protocols/classes introduce new methods and properties their names begin with `_`; treat these as protected methods, i.e. do not call them - they are part of the library. (Swift doesn't have the concept of a protected method. Similarly if the method is in a protocol there is no way to mark it as final, therefore read the documentation carefully to decide if it is suitable for overridding. Conversely if the method is defined in a class there is no way to mark it as abstract and so methods that would be abstract throw a fatal error.)
 
 ## Issues
-  1. At present if a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.)
+  1. If a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.) Whilst it would be possible to fix this, it would be a noticable performance overhead and therefore this option of items from multiple subscriptions is chosen as the 'lesser of the evils'! See `testKeepProducingBufferSizeItemsAfterCancel` in `ReactiveCollectionTests.swift` for an example.
 
 ## Roadmap
-  1. Fix known issue above and add tests.
-  2. Add `flatMap`.
   3. Add `filter`.
   4. Add `clone`.
   5. Latest value after timeout instead of timeout error, `TimeoutFutureSubscriber` - name? How does it fit with naming convention.
@@ -287,6 +287,8 @@ Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEach
           for posTerminal in posTerminals {
               posTerminal.get // Wait for each POS terminal simulation to finish.
           }
+  
+  8. See if `DispatchWorkItem` would be a better implementation for `Future`.
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.

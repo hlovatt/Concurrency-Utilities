@@ -51,6 +51,23 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(Double.pi, estimatedPi, accuracy: 0.1)
     }
     
+    func testFlatMap() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed < 5 ? seed : nil
+        }
+        let processor = FlatMapSeededProcessor(initialSeed: ()) { (_: inout Void, next: Int) in
+            next % 2 == 0 ? next : nil
+        }
+        let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(8, result)
+    }
+    
+
     // MARK: Coverage tests
     
     func testUsefulForDebugging() {
@@ -59,11 +76,60 @@ class ReactiveCollectionTests: XCTestCase {
             return seed == 1 ? 1 : nil
         }
         let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
-            result += next // Copy the string a character at a time.
+            result += next
         }
         var result = -1
         publisher ~~> subscriber ~~>? result
         XCTAssertEqual(3, result)
+    }
+    
+    func testKeepProducingBufferSizeItemsAfterCancel() {
+        let bufferSize = 2
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed < 3 * bufferSize ? seed : nil
+        }
+        let subscriber = ReduceFutureSubscriber(bufferSize: bufferSize, into: 3) { (result: inout Int, next: Int) in
+            Thread.sleep(forTimeInterval: 0.01) // Time delay to allow for cancel to happen.
+            result += next
+        }
+        publisher ~~> subscriber // Start production.
+        subscriber.cancel() // Cancel production.
+        publisher ~~> subscriber // Start production again.
+        var result = -1
+        subscriber ~~>? result // Wait for 2nd production to finish.
+        XCTAssertGreaterThan(result, 9) // Result is > 9 because 1 from first production gets through!
+    }
+    
+    func testRecievingOnCompleteBeforeSendingRequest() {
+        class SendOnComplete: PublisherBase {
+            typealias OutputT = Int
+            var _outputSubscription: Subscription {
+                return FailedSubscription.instance
+            }
+            var _outputSubscriber = Atomic<AnySubscriber<Int>?>(nil)
+            func subscribe<S>(_ newOutputSubscriber: S) where S: Subscriber, S.InputT == Int {
+                newOutputSubscriber.on(subscribe: _outputSubscription)
+                newOutputSubscriber.onComplete()
+            }
+        }
+        let publisher = SendOnComplete()
+        class DontRequest: SubscriberBase {
+            typealias InputT = Int
+            var isCompleted = false
+            func _consumeAndRequest(item: Int) throws {
+                XCTFail("No items should be produced.")
+            }
+            var _inputSubscription = Atomic<Subscription?>(nil)
+            func _handleInputSubscriptionOnComplete() {
+                isCompleted = true
+            }
+        }
+        let subscriber = DontRequest()
+        publisher ~~> subscriber
+        XCTAssertTrue(subscriber.isCompleted)
+        XCTAssertNil(publisher._outputSubscriber.value, "Should not be subscribed to.")
+        XCTAssertNil(subscriber._inputSubscription.value, "Should not have a subscription.")
     }
     
     func testMapSubscribersError() {
@@ -295,14 +361,11 @@ class ReactiveCollectionTests: XCTestCase {
     }
     
     func testCopyingProducerFreesResources() {
-        class CopyingProcessor: MapProcessorClassBase<Character, Character> {
-            override func _map(_ inputItem: Character) -> Character {
-                return inputItem
-            }
-        }
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let processor = CopyingProcessor()
+        let processor = MapSeededProcessor(initialSeed: ()) { (_: inout Void, next: Character) in
+            next
+        }
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, nextChar: Character) in
             result.append(nextChar) // Copy the string a character at a time.
         }
