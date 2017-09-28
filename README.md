@@ -157,52 +157,136 @@ and in Swift this becomes:
 This is similar to how Objective-C and C APIs are 'translated' when imported into Swift.
 
 ## Reactive Collection
-On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. These implementations are styled after the standard Swift Collection Library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceSubscriberFuture`:
+### Introduction
+On top of the specification's protocols the library provides implementations of processors, producers, and subscribers with their associated subscriptions. The reactive collections run asynchronously and provide locking and background threads without the need for the user of the library to deal with threads manually; but they are not themselves thread safe since it makes no snese to share them between threads, you use them instead of threads. These implementations are styled after the standard Swift Collection Library, in particular `Sequence`, for example there is a `ForEachProducer` and a `ReduceFutureSubscriber`:
 
-  - The arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceSubscriberFuture` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
-  - Like the Swift Collection Library the action of these classes is specified using a trailing closure, e.g. `ReduceSubscriberFuture`'s trailing closure accumulates the results.
-  - There is a logical naming convention going from most important to least important part of the name left to right of `[<SwiftCollectionName> | <Other>][Producer | Processor | Subscriber][Future]?[Seeded]?`, where:
+  - The arguments when creating these classes mimic the arguments to the methods from `Sequence`, e.g. `ReduceFutureSubscriber` accepts a `into` argument into which the reduction happens and a reduction closure that reduces the stream of items to a single item.
+  - Like the Swift Collection Library the action of these classes is specified using a trailing closure, e.g. `ReduceFutureSubscriber`'s trailing closure accumulates the results.
+  - There is a logical naming convention going from most important to least important part of the name left to right of `[<SwiftCollectionName> | <Other>][Future]?[Seeded]?[Producer | Processor | Subscriber | ForkProcessor | JoinProcessor]`, where:
   
     - `<SwiftCollectionName> | <Other>`: The method/ptotocol name of the nearest equivalent in the Swift Collection Library (e.g. `forEach` from `Sequence` for `ForEachProducer`) or another name if nothing is suitable (e.g. `ClockedForkProcessor`). The `Other` part-name ends in `ForkProcessor` for processors that fork a single flow into multiple and in `JoinProcessor` for the reverse of joing multiple flows into one.
-    - `Producer | Processor | Subscriber`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`.
-    - `Future`: *If* the class is also a `Future`; e.g. `ReduceSubscriberFuture` which gives access to the result of the reduction using  future's interface, in particular `get` or `~~>?`.
+    - `Future`: *If* the class is also a `Future`; e.g. `ReduceFutureSubscriber` which gives access to the result of the reduction using  future's interface, in particular `get` or `~~>?`.
     - `Seeded`: Is appended to the name *if* the constructor has an `initialSeed` argument that is not present in the equivalent Swift Collection method. The seed is used as working storage for the trailing closure and is passed in as an `inout` parameter. EG `IteratorProducerSeeded` passes its seed to its `nextItem` closure, the equivalent in Swift's Collection Library is `IteratorProtocol` which would be implemented in a `struct`/`class` and the implementation would provide the storage instead of seed. 'Seeded' is styled after the Swift Collection `reduce(into: initialResult) { ... }` method, where the `into` argument is in this case both the seed and the final rersult.
+    - `Producer | Processor | Subscriber | ForkProcessor | JoinProcessor`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`. `ForkProcessor` are processors that fork a single stream into multiple and  `JoinProcessor` are the reverse of joing multiple streams into one (`Fork`s and `Join`s are always `Processors` because they have, by definition, an input and an output).
 
-Reactive Collections are easy to use, since the client programmer makes instances of the classes and then joins these instances together using the `subscribe` method or `~~>` operator (see below). The other methods defined by the Reactive Stream API are not used by the client programmer, but by the library automatically. Some `Subscriber`s also extend `Future` and the  `get`, `cancel`, and `status` methods from `Future` provide client interaction. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
+Reactive Collections are easy to use, since the client programmer makes instances of the classes and then joins these instances together using the `subscribe` method or `~~>` operator (see below). The other methods defined by the Reactive Stream API are not used by the client programmer; but by the library *automatically*. Some `Subscriber`s also extend `Future` and the  `get`, `cancel`, and `status` methods from `Future` provide client interaction. In particular `get` gives access to the value of the subscriber, if any, and waits for the subscriber to complete.
 
-To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined; that is two tildes (not minus) followed by  greater-than. This was chosen because the tilde looks like an 's' on its side and the operator establishes a subscription, because the tilde is wavy and therefore represents dynamic flow, and because the greater-than indicates the direction of flow.
+To simplify connecting producers, to processors, to subscribers the operator `~~>` is defined; that is two tildes (not minus) followed by  greater-than. This was chosen because the tilde looks like an 's' on its side and the operator establishes a subscription, because the tilde is wavy and therefore represents dynamic flow, and because the greater-than indicates the direction of flow. The operator `~~>` is prefered over method `subscribe` because it habituates the programmer away from method calls which as stated above are mainly not for programmer use.
 
+### Hello World (Publishers and Subscribers)
 Hello World using this library is:
 
     let helloWorldPublisher = ForEachPublisher(sequence: "Hello, world!".characters)
-    let helloWorldSubscriber = ReduceSubscriberFuture(into: "") { (result: inout String, next: Character) in
+    let helloWorldSubscriber = ReduceFutureSubscriber(into: "") { (result: inout String, next: Character) in
         result.append(next)
     }
     var helloWorldResult = "Failed!"
     helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
 
-Note how the arguments to `ForEachProducer` and `ReduceSubscriberFuture` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
+Note how the arguments to `ForEachProducer` and `ReduceFutureSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting. `helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`).
 
-The Reactive Stream standard, see above, defines seven methods, however only one of these methods, `subscribe`, is used by a programmer using a Reactive Stream Library (using the other methods is an error). Therefore it is preferable to use `~~>` instead of `subscribe`, since this habituates the progrgrammer away from calling methods on Reactive Streams.
+### Processors
+Typically you would have intermediate stages in a calculation, `Processor`s that take an input and produce an output (these are similar to `Sequence`'s `map` and `filter` methods). The Monte Carlo method of approximating Pi estimates the ratio of the area of a square to the area of an arc. Consider a square piece of paper 1 by 1, i.e. both x and y ordinates run from 0 to 1,  with an arc drawn with centre at (0, 0) from (0, 1) to (1, 0), i.e. it has a radius of 1. If darts are randomly thrown at the paper then approximately the ratio of arc area / square area is the number of darts inside arc / total number of darts. From which Pi can be approximated as 4 times the area ratio. Using the Reactive Collection Library this is:
 
+    let maxRandom = Double(UInt32.max)
+    let randomCoordinatePublisher = IteratorSeededPublisher(initialSeed: ()) { _ in
+        return (Double(arc4random()) / maxRandom, Double(arc4random()) / maxRandom)
+    }
+    let piEstimatorProcesssor = MapSeededProcessor(initialSeed: (0, 0)) { (seed: inout (Int, Int), coordinate: (Double, Double)) -> Double in
+        var (total, inside) = seed
+        total += 1
+        let (x, y) = coordinate
+        if x * x + y * y <= 1.0 {
+            inside += 1
+        }
+        guard total < 14_000 && inside < 11_000 else {
+            throw SubscriberSignal.cancelInputSubscriptionAndComplete
+        }
+        seed = (total, inside)
+        return 4.0 * Double(inside) / Double(total)
+    }
+    let lastValueSubscriber = ReduceFutureSubscriber(into: 0.0) { (old: inout Double, new: Double) in
+        old = new
+    }
+    var estimatedPi = Double.nan
+    randomCoordinatePublisher ~~> piEstimatorProcesssor ~~> lastValueSubscriber ~~>? estimatedPi
+
+Note how the processor, `piEstimatorProcesssor` sits between the publisher, `randomCoordinatePublisher`, and the subsciber, `lastValueSubscriber`. The publisher generates an *infinite* stream of random coordinates. The subscriber memorizes the last value, *ad-infinitum*. The intersting code is in the processor which:
+
+  - Estimates Pi as described above.
+  - Is a `map` much like `Sequences`'s `map`, however it is also seeded which allows it to keep track of the total number of coordinates and the number inside the arc between each call to its mapping closure.
+  - Terminates the estimation when sufficient number of total points and points inside the arc have occurred (both the publisher and the subscriber run *indefinitely*).
+  
+Termination can be achieved by a subscriber or as in this case a processor by throwing `SubscriberSignal.cancelInputSubscriptionAndComplete`, which as the name suggests terminates the input stream by cancellation and the output stream by completion. Publishers, like `helloWorldPublisher` from the 1st example, terminate streams by calling the `onComplete` method of their subscriber (which for `ForEachPublisher` occues when the sequence's iterator's next method returns `nil`). (The Reactive Stream specification *only* allows input subscriptions to cancelled and output subscribers to be notified of completion, this throwing of `SubscriberSignal.cancelInputSubscriptionAndComplete` to allow subscribers and hence processors to signal completion is an extension provided by the Reactive Collection Library.) 
+
+### Examples
 See `ReativeCollectionTests.swift` for examples.
 
 ## Reactive Collection Bases
-Typically you use the sequence like classes, `IteratorPublisherSeeded`, `ForEachPublisher`, `ReduceSubscriberFuture`, etc., from the Reactive Collection Library. However an alternative to these are the base protocols/classes provided by the Reactive Collection Bases Library. These protocols/classes:
+Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEachPublisher`, `ReduceFutureSubscriber`, etc., from the Reactive Collection Library. However an alternative to these are the base protocols/classes provided by the Reactive Collection Bases Library. These protocols/classes:
 
   - Simplify writing your own Reactive Stream implementations.
   - Can be used as an alternative to the sequence like classes by inheriting/subclassing.
   - These classes are the base protocol/classes for the classes provided by the Reactive Collection Library described above.
   - Are abstract protocols/classes and require implementing/sub-classing, see description of protocols/classes to see which methods require implementing/overridding. Swift 4 does not have the concept of an abstract class and therefore default implementations for classes throw a fatal error. Also there is no concept in Swift 4 of protected access therefore the methods to overrride in classes have `open` access. When using a sub-class of these base clases it is safer to use the operator `~~>` and not call the methods directly since this will prevent the error of calling a method that ideally would be protected accidently.
-  - There is a logical naming convention going from most important to least important part of the name left to right, similar to that of the Reactive Collection Library described above, of `[<SwiftCollectionName> | <Other>]?[Producer | Processor | Subscriber][Future]?[Class]?[Base]` where:
+  - There is a logical naming convention going from most important to least important part of the name left to right, similar to that of the Reactive Collection Library described above, of `[<SwiftCollectionName>]?[Producer | Processor | Subscriber | ForkProcessor | JoinProcessor][Future]?[Class]?[Base]` where:
   
-    - `<SwiftCollectionName> | <Other>`: The method/ptotocol name of the nearest equivalent in the Swift Collection Library (e.g. `Iterator` from `IteratorProtocol` for `IteratorProducerBase`), another name if nothing is suitable in the Swift Collection Library (e.g. `InlineProcessorBase`), or nothing if the class is not specialised in and way (e.g. `SubscriberBase`).  The `Other` part-name ends in `ForkProcessor` for processors that fork a single flow into multiple and in `JoinProcessor` for the reverse of joing multiple flows into one.
-    - `Producer | Processor | Subscriber`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`.
-    - `Future`: *If* the class is also a `Future`; e.g. `SubscriberFutureBase` which gives access to the result of the subscription using  future's interface, in particular `get` or `~~>?`.
+    - `<SwiftCollectionName>`: The method/protocol name of the nearest equivalent in the Swift Collection Library (e.g. `Iterator` from `IteratorProtocol` for `IteratorProducerBase`), or nothing if the class is not specialised in and way (e.g. `SubscriberBase`).
+    - `Producer | Processor | Subscriber | ForkProcessor | JoinProcessor`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`. `ForkProcessor` are processors that fork a single stream into multiple and `JoinProcessor` are the reverse of joing multiple streams into one (`Fork`s and `Join`s are always `Processors` because they have, by definition, an input and an output).
+    - `Future`: *If* the class is also a `Future`; e.g. `FutureSubscriberBase` which gives access to the result of the subscription using  future's interface, in particular `get` or `~~>?`.
     - `Class`: *If* the base is a class rather than a protocol then the name has `Class` as its 2nd last element, e.g. `IteratorProducerClassBase`. (These would be abstract classes in other languages, but Swift doesn't have abstract classes. Similarly default implementations of methods that must be overridden throw a fatal exception because there are no abstract methods in Swift.)
     - `Base`: All the names end in `Base` to indicate that the protocol/class is 'abstract' and requires implementing/sub-classing.
     
     Where these protocols/classes introduce new methods and properties their names begin with `_`; treat these as protected methods, i.e. do not call them - they are part of the library. (Swift doesn't have the concept of a protected method. Similarly if the method is in a protocol there is no way to mark it as final, therefore read the documentation carefully to decide if it is suitable for overridding. Conversely if the method is defined in a class there is no way to mark it as abstract and so methods that would be abstract throw a fatal error.)
+
+## Issues
+  1. At present if a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.)
+
+## Roadmap
+  1. Fix known issue above and add tests.
+  2. Add `flatMap`.
+  3. Add `filter`.
+  4. Add `clone`.
+  5. Latest value after timeout instead of timeout error, `TimeoutFutureSubscriber` - name? How does it fit with naming convention.
+  6. Add `Fork` and `Join` `Processors` to enable:
+  
+          randomCoordinate ~~> fork ~~> [
+              countTotal,
+              filterInside ~~> countInside
+          ] ~~> join ~~> piEstimator ~~> rememberLast ~~>? result
+          
+  7. Bidirectional streams/flows, e.g. simulating international, credit card transactions at Point Of Sale (POS) terminals:
+  
+          let kyd = Currency(oneUSDIs: 0.82)
+          let pab = Currency(oneUSDIs: 1.00)
+          let chf = Currency(oneUSDIs: 0.97)
+          let currencies = [kyd, pab, chf]
+          let masterCard = CardAssociation(currencies)
+          let visaCard = CardAssociation(currencies)
+          let caymanBank = Bank(currency: kyd, association: masterCard)
+          let panamaBank = Bank(currency: pab, association: visaCard)
+          let swissBank = Bank(currency: chf, association: masterCard)
+          let donaldsCard = Card(limit: 1_000_000, bank: caymanBank)
+          let sarahsCard = Card(limit: 1_000, bank: panamaBank)
+          let vladimirsCard = Card(limit: 1_000_000_000, bank: swissBank)
+          let cards = [donaldsCard, sarahsCard, vladimirsCard]
+          let posTerminals = (0 ..< 2 * currencies.count).map { _ in
+              PosTerminal(cards)
+          }
+          
+          [posTerminals[0], posTerminals[1]] <~~> caymanBank.posTerminals
+          [posTerminals[2], posTerminals[3]] <~~> panamaBank.posTerminals
+          [posTerminals[4], posTerminals[5]] <~~> swissBank.posTerminals
+          caymanBank.cardAssociations <~~> [masterCard, visaCard]
+          panamaBank.cardAssociations <~~> [masterCard, visaCard]
+          swissBank.cardAssociations <~~> [masterCard, visaCard]
+          caymanBank.otherIssuers <~~> [panamaBank.transactionValidation, swissBank.transactionValidation]
+          panamaBank.otherIssuers <~~> [caymanBank.transactionValidation, swissBank.transactionValidation]
+          swissBank.otherIssuers <~~> [caymanBank.transactionValidation, panamaBank.transactionValidation]
+          
+          for posTerminal in posTerminals {
+              posTerminal.get // Wait for each POS terminal simulation to finish.
+          }
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.

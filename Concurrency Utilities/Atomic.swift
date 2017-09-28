@@ -9,18 +9,24 @@
 import Foundation
 
 /// Gives a unique number.
-/// Useful for inique identifiers.
 ///
-/// - note: An `enum` is used as a namespace since that is the nearest available in Swift.
+/// - note:
+///   - An `enum` is used as a namespace since that is the nearest available in Swift.
+///   - Useful for inique identifiers.
+///   - Is thread safe.
 public enum UniqueNumber {
+    private static var queue = DispatchQueue(label: "UniqueNumber Serial Queue", qos: DispatchQoS.userInitiated)
+    
     private static var uniqueNumber = Int.min
     
     /// The next unique number.
     public static var next: Int {
-        defer {
+        var result = 0
+        queue.sync {
             uniqueNumber += 1
+            result = uniqueNumber
         }
-        return uniqueNumber
+        return result
     }
 }
 

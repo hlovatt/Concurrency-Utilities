@@ -20,7 +20,7 @@ extension Thread {
             result = closure()
         } else {
             DispatchQueue.main.sync {
-                result = closure()
+                result = closure() // Can't think how to test this.
             }
         }
         return result!
@@ -273,7 +273,7 @@ public final class AsynchronousFuture<T>: Future<T> {
             case .running:
                 switch group.wait(timeout: timeoutTime) { // Wait for calculation completion.
                 case .success:
-                break // Loop round and test status again to extract result
+                    break // Loop round and test status again to extract result
                 case .timedOut:
                     terminateFuture.value = .timedOut
                     return nil

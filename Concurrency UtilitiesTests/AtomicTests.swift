@@ -80,6 +80,27 @@ class AtomicTests: XCTestCase {
         group.wait()
     }
     
+    func testUniqueNumber() {
+        let group = DispatchGroup()
+        var ns = Array(repeating: 0, count: 100)
+        for i in 0 ..< ns.count {
+            group.enter()
+            DispatchQueue.global().async {
+                ns[i] = UniqueNumber.next
+                group.leave()
+            }
+        }
+        group.wait()
+        for i in 0 ..< ns.count {
+            for j in 0 ..< ns.count {
+                guard i != j else {
+                    continue
+                }
+                XCTAssertNotEqual(ns[i], ns[j])
+            }
+        }
+    }
+    
     // MARK: Templates (in case needed in future).
     
     //    override func setUp() {

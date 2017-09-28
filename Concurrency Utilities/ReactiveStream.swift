@@ -118,11 +118,34 @@ infix operator ~~>? : MultiplicationPrecedence
 
 // Add flow syntax as an extension to `Subscriber` rather than `Publisher`, since the subscriber is returned and therefore the full type information, Self, is available for subsequent stages.
 public extension Subscriber {
-    /// Subscribe to the publisher using stream flow syntax.
+    /// Subscribe a subscriber to a publisher using stream flow syntax, `publisher ~~> subscriber1`.
     ///
     /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
     @discardableResult public static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.OutputT == InputT {
         left.subscribe(right)
+        return right
+    }
+    
+    /// Subscribe a subscriber to multiple publishers using stream flow syntax, `[publisher1, publisher2, ...] ~~> subscriber`.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    @discardableResult public static func ~~> <S, P>(left: S, right: Self) -> Self where S: Sequence, S.Iterator.Element == P, P: Publisher, P.OutputT == InputT {
+        for publisher in left {
+            publisher.subscribe(right)
+        }
+        return right
+    }
+}
+
+// Add flow syntax as an extension to `Sequence` rather than `Publisher`, since the sequence is returned and therefore the full type information, Self, is available for subsequent stages.
+public extension Sequence {
+    /// Subscribe multiple subscribers to a single publisher using stream flow syntax, `publisher ~~> [subscriber1, subscriber2, ...]`.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    @discardableResult public static func ~~> <P, S>(left: P, right: Self) -> Self where Self.Iterator.Element == S,  S: Subscriber, P: Publisher, P.OutputT == S.InputT {
+        for subscriber in right {
+            left.subscribe(subscriber)
+        }
         return right
     }
 }

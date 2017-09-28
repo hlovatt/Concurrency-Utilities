@@ -26,12 +26,10 @@ public protocol PublisherBase: Publisher {
     /// Reset the subscription, called before subscription is granted to subscriber.
     func _resetOutputSubscription()
     
-    /// Indicates if the given new subscription should be accepted or not.
+    /// Indicates if the given new output subscription should be accepted or not.
     ///
-    /// - parameter newSubscriber: The `Subscriber` that wishes to obtain a subscription, passed in so that a dummy failed subscription, e.g. `FailedSubscription.instance`, and errors can be sent to the subscription if it is rejected.
-    ///
-    /// - returns: `true` if the given `Subscriber` is accepted.
-    func _isAccepted<S>(newSubscriber: S) -> Bool where S: Subscriber, S.InputT == OutputT
+    /// - returns: An empty string if the given `Subscriber` is accepted, otherwise an error message to pass onto the subscriber whose subscription request was rejected.
+    var _isNewOutputSubscriberAccepted: String { get }
     
     /// The output subscriber, if any, held inside an atomic, so that it is thread safe.
     ///
@@ -43,34 +41,37 @@ public protocol PublisherBase: Publisher {
 
 public extension PublisherBase {
     /// Default imlementation does nothing.
-    func _resetOutputSubscription() {}
+    func _resetOutputSubscription() {} // Can't be bothered to test.
     
-    /// Default imlementation accepts the subscription by returning `true`, but does nothing else.
-    func _isAccepted<S>(newSubscriber _: S) -> Bool where S: Subscriber, S.InputT == OutputT {
-        return true
+    /// Default imlementation accepts the subscription by returning an empty string, but does nothing else.
+    var _isNewOutputSubscriberAccepted: String {
+        return ""
     }
     
     /// Default imlementation should not be overridden.
-    func subscribe<S>(_ newSubscriber: S) where S: Subscriber, S.InputT == OutputT {
+    func subscribe<S>(_ newOutputSubscriber: S) where S: Subscriber, S.InputT == OutputT {
         var isSubscriptionError = false
         _outputSubscriber.update { outputSubscriberOptional in
             guard outputSubscriberOptional == nil else {
-                newSubscriber.on(subscribe: FailedSubscription.instance) // Reactive stream specification requires this to be called.
-                newSubscriber.on(error: PublisherErrors.subscriptionRejected(reason: "Can only have one subscriber at a time."))
+                newOutputSubscriber.on(subscribe: FailedSubscription.instance) // Reactive stream specification requires this to be called.
+                newOutputSubscriber.on(error: PublisherErrors.subscriptionRejected(reason: "Can only have one subscriber at a time."))
                 isSubscriptionError = true
                 return outputSubscriberOptional
             }
-            guard _isAccepted(newSubscriber: newSubscriber) else {
+            let errorMessage = _isNewOutputSubscriberAccepted
+            guard errorMessage.count == 0 else {
+                newOutputSubscriber.on(subscribe: FailedSubscription.instance) // Reactive stream specification requires this to be called.
+                newOutputSubscriber.on(error: PublisherErrors.subscriptionRejected(reason: errorMessage))
                 isSubscriptionError = true
                 return nil
             }
-            return AnySubscriber(newSubscriber)
+            return AnySubscriber(newOutputSubscriber)
         }
         guard !isSubscriptionError else {
             return
         }
         _resetOutputSubscription()
-        newSubscriber.on(subscribe: _outputSubscription)
+        newOutputSubscriber.on(subscribe: _outputSubscription)
     }
 }
 
@@ -112,9 +113,6 @@ public protocol IteratorPublisherBase: PublisherBase, Subscription {
     /// The `producing` tasks are `Future`s, to allow cancellation, and inside a dictionary indexed with a unique number, producer number, to allow them to be both indivdually and *en masse* cancelled and deleted.
     var _outputProducers: [Int : Future<Void>] { get set }
     
-    /// Unique number for each producer generated as a result of a `request`.
-    var producerNumber: Int { get set }
-    
     /// Called to request `n` more items to be produced.
     /// Schedules the production of items in blocks of upto `bufferSize` units.
     ///
@@ -143,13 +141,13 @@ public extension IteratorPublisherBase {
         }
         _outputSubscriber.update { outputSubscriberOptional in
             guard let outputSubscriber = outputSubscriberOptional else { // Guard against already finished.
-                fatalError("`request` called without a subscriber.") // Can't test fatal errors!
+                return nil // Can't hink how to test this!
             }
             guard n > 0 else { // Guard against -ve n.
                 outputSubscriber.on(error: PublisherErrors.cannotProduceRequestedNumberOfItems(numberRequested: n, reason: "Negative number of items not allowed."))
                 return nil  // Completed.
             }
-            let thisProducersNumber = producerNumber
+            let thisProducersNumber = UniqueNumber.next
             let producer = AsynchronousFuture(queue: self._outputDispatchQueue) { isTerminated throws -> Void in
                 var count = n
                 while count > 0 {
@@ -167,7 +165,9 @@ public extension IteratorPublisherBase {
                         self.cancel() // Cancel remaining queued production and mark this subscription as complete.
                         return
                     }
-                    count = innerCount > 0 ? -1 : count - innerLimit
+                    count = innerCount > 0 ?
+                        -1 :
+                        count - innerLimit
                 }
                 self._outputProducers.removeValue(forKey: thisProducersNumber) // This producer has finished.
                 if count < 0 { // Complete?
@@ -176,7 +176,6 @@ public extension IteratorPublisherBase {
                 }
             }
             _outputProducers[thisProducersNumber] = producer
-            producerNumber += 1
             return outputSubscriberOptional
         }
     }
@@ -184,10 +183,7 @@ public extension IteratorPublisherBase {
     /// Cancel the subscription and cancel any outstanding item production on a best efforts basis, i.e. additional items may be produced before the cancellation takes effect.
     /// Items are produced in upto `bufferSized` blocks and the current block will keep producing items after cancelleation, but a scheduled but unstarted block will be cancelled.
     func cancel() {
-        _outputSubscriber.update { outputSubscriberOptional in
-            guard outputSubscriberOptional != nil else { // Guard against `cancel` called when no subscriber.
-                fatalError("`cancel` or `request(0)` called without a subscriber.") // Can't test a fatal error.
-            }
+        _outputSubscriber.update { _ in
             for producer in self._outputProducers.values {
                 producer.cancel() // Cancel item production from queued producer.
             }
@@ -214,8 +210,6 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
     
     public var _outputProducers = [Int : Future<Void>]()
     
-    public var producerNumber = 0
-    
     /// A convenience class for implementing `IteratorPublisherBase`; it provides all the stored properties.
     ///
     /// - parameters:
@@ -228,7 +222,7 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
     
     /// Default implementation throws a fatal error and *must* be overridden.
     open func _next() throws -> O? {
-        fatalError("Must override method `next`")
+        fatalError("Must override method `next`") // Can't test fatal errors.
     }
     
     /// Default implementation does nothing and therefore *might* require overridding.
@@ -245,7 +239,7 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
 ///   - There are *no* methods/properties intended for use by a client (the programmer using an instance of this class); the client *only* passes the instance to the `subscribe` method of a `Publisher`, which is best accomplished by `publisher ~~> subscriber`.
 ///
 /// - note:
-///   - A new successful subscription causes `handleNewSubscription` to be called; the default implementation of which does nothing other than return true to indicate that the new subscription should be accepted.
+///   - A new successful subscription causes `handleNewSubscription` to be called; the default implementation of which does nothing.
 ///   - Multiple subscriptions, errors from the subscription, and completed subscriptions all cause the current subscription to be cancelled and freed (set to `nil`) and call there relevent handlers (see point below); but take *no* further action.
 ///   - Override methods `handleMultipleSubscriptionError()`, `handleOn(error: Error)`, `handleOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
 ///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
@@ -256,21 +250,19 @@ public protocol SubscriberBase: Subscriber {
     /// - parameter item: The next item.
     func _consumeAndRequest(item: InputT) throws
     
-    /// Called when a new subscription is accepted and signals by return boolean if the subscription is to be accepted and if necessary requests initial items from subscription.
+    /// Called when a new input subscription is requested and if necessary requests an initial production run of items from the subscription.
     ///
-    /// - parameter subscription: The subscription that is to be granted and requested from by this method.
-    ///
-    /// - returns: `true` if the subscription has been accepted, false otherwise.
-    func _handleNewSubscriptionAndRequest(subscription: Subscription) -> Bool
+    /// - parameter newInputSubscription: The input subscription that might have an initial production run requested from it by this method.
+    func _handleAndRequestFrom(newInputSubscription: Subscription)
     
-    /// Called when there is an attempt to make multiple subscriptions.
-    func _handleMultipleSubscriptionError()
+    /// Called when there is an attempt to make multiple input subscriptions.
+    func _handleMultipleInputSubscriptionError()
     
-    /// Called when there is a subscription error.
-    func _handleOn(error: Error)
+    /// Called by the input subscription when there is a production error that has terminated production and no more items will be produced - even if more are requested.
+    func _handleInputSubscriptionOn(error: Error)
     
-    /// Called when the subscription completes.
-    func _handleOnComplete()
+    /// Called by the input subscription when the publisher has finished producting items (production run is complete and no more items will be produced - even if more are requested).
+    func _handleInputSubscriptionOnComplete()
     
     /// The input subscription, if any, held inside an atomic, so that it is thread safe.
     ///
@@ -281,58 +273,86 @@ public protocol SubscriberBase: Subscriber {
 }
 
 public extension SubscriberBase {
-    /// Returns true, i.e. subscription always succeeds and given `Subscription` is unused.
-    func _handleNewSubscriptionAndRequest(subscription _: Subscription) -> Bool {
-        return true // Can't be bothered to test this!
-    }
+    /// Default implementation does nothing.
+    func _handleAndRequestFrom(newInputSubscription _: Subscription) {}
     
     /// Default implimentation throws a fatal error.
-    func _handleMultipleSubscriptionError() {
+    func _handleMultipleInputSubscriptionError() {
         fatalError("Can only have one subscription at a time.") // Cannot test a fatal error!
     }
     
     /// Default implimentation throws a fatal error.
-    func _handleOn(error: Error) {
+    func _handleInputSubscriptionOn(error: Error) {
         fatalError("Subscription error: \(error).") // Cannot test a fatal error!
     }
     
     /// Default implimentation throws a fatal error.
-    func _handleOnComplete() {
+    func _handleInputSubscriptionOnComplete() {
         fatalError("Subscription complete.") // Cannot test a fatal error!
     }
     
+    /// Default implementation checks that it is not already subscribed to, if it is it cancels both the exsisting and new subscriptions, and if not then calls `handleAndRequestFrom`.
     func on(subscribe: Subscription) {
         _inputSubscription.update { subscriptionOptional in
             guard subscriptionOptional == nil else { // Cannot have more than one subscription.
                 subscriptionOptional!.cancel()
-                _handleMultipleSubscriptionError()
+                subscribe.cancel()
+                _handleMultipleInputSubscriptionError()
                 return nil
             }
-            guard _handleNewSubscriptionAndRequest(subscription: subscribe) else { // Instigate new subscription and  check if successful.
-                return nil
-            }
+            _handleAndRequestFrom(newInputSubscription: subscribe)
             return subscribe
         }
     }
     
+    /// Default implementation passes given item onto `_consumeAndRequest`, catches and processes `SubscriberSignal`s,  catches and reports other errors using `on(error:)`, and `nil`s out `_inputSubscription` to free resources.
     func on(next nextItem: InputT) {
         do {
             try _consumeAndRequest(item: nextItem) // Process the next item.
         } catch {
-            on(error: error)
+            guard let signal = error as? SubscriberSignal else {
+                _inputSubscription.update { inputSubscriptionOptional in
+                    guard let inputSubscription = inputSubscriptionOptional else {
+                        return nil // Already finished.
+                    }
+                    inputSubscription.cancel()
+                    _handleInputSubscriptionOn(error: error)
+                    return nil // Free subscription's resources.
+                }
+                return
+            }
+            switch signal {
+            case .cancelInputSubscriptionAndComplete:
+                _inputSubscription.update { inputSubscriptionOptional in
+                    guard let inputSubscription = inputSubscriptionOptional else {
+                        return nil // Already finished.
+                    }
+                    inputSubscription.cancel()
+                    _handleInputSubscriptionOnComplete()
+                    return nil // Free subscription's resources.
+                }
+            }
         }
     }
     
+    /// Default implementation calls `_handleInputSubscriptionOn(error:)` and `nil`s out `_inputSubscription` to free resources.
     func on(error: Error) {
-        _inputSubscription.update { subscription in
-            _handleOn(error: error)
+        _inputSubscription.update { inputSubscriptionOptional in
+            guard inputSubscriptionOptional != nil else {
+                return nil // Already finished. Can't think how to test this!
+            }
+            _handleInputSubscriptionOn(error: error)
             return nil // Free subscription's resources.
         }
     }
     
+    /// Default implementation calls `_handleInputSubscriptionOnComplete()` and `nil`s out `_inputSubscription` to free resources.
     func onComplete() {
-        _inputSubscription.update { subscription in
-            _handleOnComplete()
+        _inputSubscription.update { inputSubscriptionOptional in
+            guard inputSubscriptionOptional != nil else {
+                return nil // Already finished.
+            }
+            _handleInputSubscriptionOnComplete()
             return nil // Free subscription's resources.
         }
     }
@@ -347,7 +367,7 @@ public extension SubscriberBase {
 ///   - There are *no* methods/properties intended for use by a client (the programmer using an instance of this class), the client *only* passes the instance to the `subscribe` method of a `Publisher`, which is best accomplished using `publisher ~~> subscription`.
 ///
 /// - note:
-///   - A new successful subscription causes `handleNewSubscription` to be called; the default implementation of which does nothing other than return true to indicate that the new subscription should be accepted.
+///   - A new successful subscription causes `handleNewSubscription` to be called; the default implementation of which does nothing.
 ///   - Multiple subscriptions, errors from the subscription, and completed subscriptions all cause the current subscription to be cancelled and freed (set to `nil`) and call there relevent handlers (see point below); but take *no* further action.
 ///   - Override methods `handleMultipleSubscriptionError()`, `handleOn(error: Error)`, `handleOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
 ///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
@@ -358,10 +378,8 @@ public protocol RequestorSubscriberBase: SubscriberBase {
     /// - parameter item: The next item.
     func _consume(item: InputT) throws
     
-    /// Called when a new subscription is accepted and signals by return boolean if the subscription is to be accepted and if necessary requests initial items from subscription.
-    ///
-    /// - returns: `true` if the subscription has been accepted, false otherwise.
-    func _handleNewSubscription() -> Bool
+    /// Called when a new input subscription is requested.
+    func _handleNewInputSubscription()
     
     var _inputBufferSize: Int { get }
     
@@ -369,12 +387,10 @@ public protocol RequestorSubscriberBase: SubscriberBase {
 }
 
 public extension RequestorSubscriberBase {
-    /// Default implementation return true, indicating that new subscription should be accepted.
-    func _handleNewSubscription() -> Bool {
-        return true // Can't be bothered to test this!
-    }
+    /// Default implementation does nothing.
+    func _handleNewInputSubscription() {} // Can't be bothered to test.
     
-    /// Default implementation requests `bufferSize` items from subscription when current request is exhausted, calls the `next` mthod to process the next item, and reports any errors.
+    /// Default implementation requests `bufferSize` items from subscription when current request is exhausted, calls the `next` mthod to process the next item, and throws any errors.
     func _consumeAndRequest(item: InputT) throws {
         _inputCountToRefill -= 1
         if _inputCountToRefill <= 0 { // Request more items when `bufferSize` items 'accumulated'.
@@ -384,23 +400,19 @@ public extension RequestorSubscriberBase {
         try _consume(item: item) // Process the next item.
     }
     
-    /// Default implementation requests two lots of `bufSize` items from the subscriber, so that one lot is always in-flight, and returns the acceptance status from `handleNewSubscription`.
-    func _handleNewSubscriptionAndRequest(subscription: Subscription) -> Bool {
-        guard _handleNewSubscription() else {
-            return false
-        }
+    /// Default implementation requests two lots of `bufSize` items from the subscription, so that one lot is always in-flight, if the subscription is accepted and returns the acceptance status from `handleNewSubscription`.
+    func _handleAndRequestFrom(newInputSubscription: Subscription) {
+        _handleNewInputSubscription()
         _inputCountToRefill = _inputBufferSize
-        subscription.request(_inputBufferSize) // Start subscription
-        subscription.request(_inputBufferSize) // Ensure that two lots of items are always in flight.
-        return true
+        newInputSubscription.request(_inputBufferSize) // Start subscription
+        newInputSubscription.request(_inputBufferSize) // Ensure that two lots of items are always in flight.
     }
 }
 
-/// Errors that a subscriber can report.
+/// Errors that a subscriber that is also a future can report.
 /// A pure `Subscriber` has no means of reporting errors, all it can do is cancel its subscription without giving reason.
 /// However, `Subscribers` that are also `Future`s can report their errors via `Future`'s `status`.
-enum SubscriberErrors: Error {
-    
+enum FutureSubscriberErrors: Error {
     /// Many `Subscribers` have a limit on the number of subscriptions they can have at one time, typically limited to one, and if this number is exceeded then the subscriper terminates and reports the error.
     case tooManySubscriptions(number: Int)
 }
@@ -425,7 +437,7 @@ enum SubscriberErrors: Error {
 /// - parameters
 ///   - T: The type of the elements subscribed to.
 ///   - R: The result type of the accumulation.
-open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
+open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     /// The number of items to request at a time.
     public let _inputBufferSize: Int
     
@@ -470,9 +482,10 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     
     // MARK: Methods that must be overridden
     
+    /// Consume the next item from the input subscription.
     /// Default implementation throws a fatal error, *must* be overridden.
     open func _consume(item: T) throws {
-        fatalError("Method must be overridden")
+        fatalError("Method must be overridden") // Can't test a fatal error.
     }
     
     /// Return the result so far (called when the accumulation is complete and its value stored in status and returned by `get`).
@@ -480,7 +493,7 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
         fatalError("Getter must be overridden.") // Can't test a fatal error.
     }
     
-    /// Reset the accumulation for another evaluation.
+    /// Reset the accumulation for another evaluation (called each time there is a new input subscription).
     open func _resetAccumulation() {} // Can't be bothered to test.
     
     // MARK: Future properties and methods
@@ -519,7 +532,8 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     public final override func cancel() {
         switch _status.value {
         case .running:
-            on(error: TerminateFuture.cancelled)
+            _inputSubscription.value?.cancel() // Cancel the input.
+            on(error: TerminateFuture.cancelled) // Set status to cancelled.
         default:
             break // Do nothing - already finished.
         }
@@ -529,19 +543,19 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     
     public typealias InputT = T
     
-    /// Sets the status to running, restes the acuumulation, and returns `true` to indicate acceptance of the subscription.
-    public final func _handleNewSubscription() -> Bool {
+    /// Sets the status to running and restes the acuumulation.
+    /// - note: The method is called after checking that there is not already a subscription, therefore method does not check for multiple subscriptions.
+    public final func _handleNewInputSubscription() {
         _status.value = .running
         _resetAccumulation()
-        return true
     }
     
     /// Sets `status` to `.threw(error: SubscriberErrors.tooManySubscriptions(number: 2))`.
-    public final func _handleMultipleSubscriptionError() {
+    public final func _handleMultipleInputSubscriptionError() {
         self._status.update {
             switch $0 {
             case .running:
-                return .threw(error: SubscriberErrors.tooManySubscriptions(number: 2))
+                return .threw(error: FutureSubscriberErrors.tooManySubscriptions(number: 2))
             default:
                 fatalError("Should be `.running` for a multiple subscription error.") // Can't test a fatal error!
             }
@@ -549,25 +563,25 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     }
     
     /// Sets `status` to `.threw(error: error)`.
-    public final func _handleOn(error: Error) {
+    public final func _handleInputSubscriptionOn(error: Error) {
         _status.update {
             switch $0 {
             case .running:
                 return .threw(error: error)
             default:
-                return $0 // Ignore if already terminated.
+                return $0 // Ignore if already terminated. Can't think how to test.
             }
         }
     }
     
     /// Sets `status` to `.completed(result: accumulator)`.
-    public final func _handleOnComplete() {
+    public final func _handleInputSubscriptionOnComplete() {
         _status.update {
             switch $0 {
             case .running:
                 return .completed(result: _result)
             default:
-                return $0 // Ignore if already terminated.
+                return $0 // Ignore if already terminated. Can't think how to test.
             }
         }
     }
@@ -575,10 +589,9 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
 
 // MARK: Base `Processor`s.
 
-/// Base class for processors that take items from its input subscription, process them using the `process` method, and make the new items available via its output subscription.
+/// Base class for processors that take items from its input subscription, process them using the `map` method, and make the new items available via its output subscription.
 ///
 /// - warning:
-///   - Method `process` must be overridden (the default implementation throws a fatal error).
 ///   - When a subscriber subscribes to this class it is passed `self` (because this class is its own subscription).
 ///     Therefore each subscriber has to `nil` out its reference to the subscription when it receives either `on(error: Item)` or `onComplete()`, otherwise there will be a retain cycle memory leak.
 ///   - If either methods `cancel` or `request` (from `Subscription`) are called when there is no subscriber the result is a fatal error.
@@ -596,27 +609,31 @@ open class SubscriberFutureClassBase<T, R>: Future<R>, RequestorSubscriberBase {
 ///   - If the input subscription completes then this class completes its output subscription.
 ///   - If the input subscription signals an error then this class signals the error to its output subscription.
 ///   - If the `process` method throws then the error the error propagated to the output subscription and the input subscription is cancelled.
-///   - There is no concept of an abstract class in Swift, in other languages this would be an abstract class.
 ///   - The associated types are:
 ///     - InputT: The type of the input items.
 ///     - OutputT: The type of the output items.
-public protocol InlineProcessorBase: Processor, SubscriberBase, PublisherBase, Subscription {
+public protocol MapProcessorBase: Processor, SubscriberBase, PublisherBase, Subscription {
     /// Takes given input item and processes it into an outut item.
     ///
     /// - parameter inputItem: The input item to be processed.
     ///
     /// - returns: The processed input item.
-    func _process(_ inputItem: InputT) throws -> OutputT
+    func _map(_ inputItem: InputT) throws -> OutputT
 }
 
-extension InlineProcessorBase {
-    /// Default implementation `process`es the input `item` from the input subscription and passes it onto the output subscription.
+public extension MapProcessorBase {
+    /// Default returns self since `ProcessorBase` is its own `Subscription`.
+    public var _outputSubscription: Subscription {
+        return self
+    }
+    
+   /// Default implementation `process`es the input `item` from the input subscription and passes it onto the output subscription.
     func _consumeAndRequest(item: InputT) throws {
-        _outputSubscriber.value?.on(next: try _process(item))
+        _outputSubscriber.value?.on(next: try _map(item))
     }
     
     /// Default implementation terminates the existing input subscription, if there is one, with error `PublisherErrors.existingSubscriptionTerminated(reason: "...")`.
-    func _handleMultipleSubscriptionError() {
+    func _handleMultipleInputSubscriptionError() {
         _outputSubscriber.update { outputSubscriberOptional in
             outputSubscriberOptional?.on(error: PublisherErrors.existingSubscriptionTerminated(reason: "Attempt to subscribe `Processor` to multiple publishers (in addition to this subscription)."))
             return nil
@@ -624,7 +641,7 @@ extension InlineProcessorBase {
     }
     
     /// Default implementation passes given error from the output subscription onto existing input subscription and terminates it, if there is one.
-    func _handleOn(error: Error) {
+    func _handleInputSubscriptionOn(error: Error) {
         _outputSubscriber.update { outputSubscriberOptional in
             outputSubscriberOptional?.on(error: error)
             return nil
@@ -632,31 +649,23 @@ extension InlineProcessorBase {
     }
     
     /// Default implementation terminates the existing input subscription, if there is one, with `onComplete()`.
-    func _handleOnComplete() {
+    func _handleInputSubscriptionOnComplete() {
         _outputSubscriber.update { outputSubscriberOptional in
             outputSubscriberOptional?.onComplete()
             return nil
         }
     }
     
-    /// Default implementation returns `self` since an `InlineProcessorBase` is its own `Subscription`.
-    var subscription: Subscription {
-        return self
+    /// Default implementation only accepts an output subscriber if the processor already has an input subscription.
+    var _isNewOutputSubscriberAccepted: String {
+        return _inputSubscription.value == nil ?
+            "Cannot have an output subscriber without an input subscription." :
+            ""
     }
     
-    /// Default implementation only accepts an output subscription if the processor already has an input subscription.
-    func _isAccepted<S>(newSubscriber _: S) -> Bool where S: Subscriber, S.InputT == OutputT {
-        return _inputSubscription.value != nil
-    }
-    
-    /// Default implementation cancels the input subscription, if there is one.
+    /// Default implementation cancels the input subscription and `nils` out reference to it and the output subscriber, if they exist.
     func cancel() {
-        _outputSubscriber.update { outputSubscriber in
-            guard outputSubscriber != nil else {
-                fatalError("`cancel` called without a subscriber to the output.") // Can't test a fatal error.
-            }
-            return nil
-        }
+        _outputSubscriber.value = nil
         _inputSubscription.update { inputSubscription in
             inputSubscription?.cancel()
             return nil
@@ -670,4 +679,33 @@ extension InlineProcessorBase {
         }
         _inputSubscription.value!.request(n)
     }
+}
+
+/// A convenience class for implementing `MapProcessorBase`; it provides all the stored properties.
+///
+/// - warning: `map` must be overridden because the default implementation throws a fatal error.
+///
+/// - parameters
+///   - I: The type of the input items to be processed.
+///   - O: The type of the output items produced.
+open class MapProcessorClassBase<I, O>: MapProcessorBase {
+    /// The input item's type.
+    public typealias InputT = I
+    
+    /// The output item's type.
+    public typealias OutputT = O
+    
+    /// The subscriber to the output, if there is one.
+    public let _outputSubscriber = Atomic<AnySubscriber<O>?>(nil)
+    
+    /// The input subscription, if there is one.
+    public let _inputSubscription = Atomic<Subscription?>(nil)
+    
+    /// Mapping function; must be overridden, default implementation throws fatal error.
+    open func _map(_ inputItem: I) throws -> O {
+        fatalError("Must override method `_map`.") // Can't test fatal error.
+    }
+    
+    /// Resets the output subscription when a new output subscription starts, default implementation does nothing.
+    open func _resetOutputSubscription() {}
 }

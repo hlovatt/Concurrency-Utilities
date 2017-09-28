@@ -29,7 +29,7 @@ import Foundation
 /// - parameters
 ///   - S: The type of the seed used by given closure `nextItem`.
 ///   - O: The type of the output items produced by given closure `nextItem`.
-public final class IteratorPublisherSeeded<S, O>: IteratorPublisherClassBase<O> {
+public final class IteratorSeededPublisher<S, O>: IteratorPublisherClassBase<O> {
     private let initialSeed: S
     
     private let nextItem: (inout S) throws -> O?
@@ -110,7 +110,15 @@ public final class ForEachPublisher<O>: IteratorPublisherClassBase<O> {
     }
 }
 
-// MARK: `Subscribers`s.
+// MARK: `Subscriber`s.
+
+/// Signals, as opossed to errors, that `Subscriber`s can send by throwing the signals as errors (they are intercepted and do not result in stream errors).
+/// There is no standard way of a subscriber asking for actions, e.g. completion, in the Reactive Stream Specification and therefore throwing these signals must only be used within the Reactive Collection Library.
+public enum SubscriberSignal: Error {
+    /// Indicates that the subscribers input subscription should be cancelled and the subscriber's `onComplete` method should be called to mark the end of items from the subscription.
+    /// This is useful when a subscriber, or a processor which is a subscriber, needs to signal successful completion, rather than signal an error.
+    case cancelInputSubscriptionAndComplete
+}
 
 /// A `Subscriber` that is also a `Future` that takes items from its subscription and passes them to the given `updateAccumulatingResult` which combines them with the given `initialResult` and when finished returns via `get` the now modified `initialResult` (Reactive Stream version of `Sequence.reduce(into:_:)`).
 ///
@@ -128,7 +136,7 @@ public final class ForEachPublisher<O>: IteratorPublisherClassBase<O> {
 /// - parameters
 ///   - T: The type of the elements subscribed to.
 ///   - R: The result type of the accumulation.
-public final class ReduceSubscriberFuture<T, R>: SubscriberFutureClassBase<T, R> {
+public final class ReduceFutureSubscriber<T, R>: FutureSubscriberClassBase<T, R> {
     private let initialResult: R
     
     /// A `Subscriber` that is also a future that takes items from its subscription and passes them to the given `updateAccumulatingResult` which combines them with the given `initialResult` and when finished returns via `get` the now modified `initialResult` (Reactive Stream version of `Sequence.reduce(into:_:)`).
@@ -150,14 +158,14 @@ public final class ReduceSubscriberFuture<T, R>: SubscriberFutureClassBase<T, R>
     ///   - updateAccumulatingResult: A closure that accepts the given `into` as an `inout` parameter and an item from a subscription and combines them into `into`.
     ///   - accumulator: The running accumulator (this is the given `into` and is the value returned via `get`).
     ///   - next: The next item to be accumulated.
-    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: Int = ReactiveStreams.defaultBufferSize, into initialResult: R, updateAccumulatingResult: @escaping ( _ accumulator: inout R, _ next: T) throws -> ()) {
+    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: Int = ReactiveStreams.defaultBufferSize, into initialResult: R, updateAccumulatingResult: @escaping (_ accumulator: inout R, _ next: T) throws -> ()) {
         self.initialResult = initialResult
         result = initialResult
         self.updateAccumulatingResult = updateAccumulatingResult
         super.init(timeout: timeout, bufferSize: bufferSize)
     }
     
-    private let updateAccumulatingResult: ( _ accumulator: inout R, _ next: T) throws -> ()
+    private let updateAccumulatingResult: (_ accumulator: inout R, _ next: T) throws -> ()
     
     public override func _consume(item: T) throws {
         try updateAccumulatingResult(&result, item)
@@ -175,3 +183,47 @@ public final class ReduceSubscriberFuture<T, R>: SubscriberFutureClassBase<T, R>
 }
 
 // MARK: `Processors`s.
+
+/// A `Processor` that takes input items from its input subscription maps (a.k.a. processes, a.k.a. transforms) them into output items, using its seed, and outputs them and to its output subscriber (Reactive Stream version of `Sequence.map(_ transform:)`).
+///
+/// - warning:
+///   - `processors`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///   - There are *no* `Publisher` methods/properties intended for use by a client (the programmer using an instance of this class), the client *only* passes the instance to the `subscribe` method of a `Publisher`.
+///   Passing the instance to the publisher is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
+///
+/// - parameters
+///   - S: The type of the seed accepted by the given transform closure.
+///   - T: The type of the elements subscribed to.
+///   - R: The result type of the accumulation.
+public final class MapSeededProcessor<S, I, O>: MapProcessorClassBase<I, O> {
+    private let initialSeed: S
+    
+    private let transformClosure: (inout S, I) throws -> O
+    
+    private var seed: S
+    
+    /// A `Processor` that takes input items from its input subscription maps (a.k.a. processes, a.k.a. transforms) them into output items, using its seed, and outputs them and to its output subscriber (Reactive Stream version of `Sequence.map(_ transform:)`).
+    ///
+    /// - parameters:
+    ///   - initialSeed: The initial value of the seed at the start of new input and output subscription.
+    ///   - transform: The mapping/processing transform that converts an input item intop an output item.
+    public init(initialSeed: S, transform: @escaping (_ seed: inout S, _ nextItem: I) throws -> O) {
+        self.initialSeed = initialSeed
+        seed = initialSeed
+        transformClosure = transform
+    }
+    
+    /// Calls the transform closure with the seed and the given input item.
+    ///
+    /// - parameter inputItem: The input item to be transformed/mapped/processed.
+    ///
+    /// - returns: The transformed/mapped/processed input item.
+    public override func _map(_ inputItem: I) throws -> O {
+        return try transformClosure(&seed, inputItem)
+    }
+    
+    /// Resets the seed at the start of each new output subscription.
+    public override func _resetOutputSubscription() {
+        seed = initialSeed
+    }
+}
