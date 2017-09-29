@@ -185,7 +185,7 @@ Hello World using this library is:
 
 Note how the arguments to `ForEachProducer` and `ReduceFutureSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
 
-`helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`). `Publisher`s produce items in the background via Grand Central Dispartch (GCD) queues and the items are passed to and processed by subsequent stages in the thread processing the queued production task. The production of items per task is specified by the *subscribers* `bufferSize` argument, since it is the subscriber that requests items to be produced. The quality of service expected from the producer's queue can be specified when constructing the producer.
+`helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`). `Publisher`s produce items in the background via Grand Central Dispartch (GCD) queues and the items are passed to and processed by subsequent stages in the thread processing the queued production task. The production of items per task is specified by the *subscribers* `bufferSize` argument, since it is the subscriber that requests items to be produced. The queue that a producer is to use can be specified when constructing the producer.
 
 ### Processors
 Typically you would have intermediate stages in a calculation, `Processor`s that take an input and produce an output (these are similar to `Sequence`'s `map` and `filter` methods). The Monte Carlo method of approximating Pi estimates the ratio of the area of a square to the area of an arc. Consider a square piece of paper 1 by 1, i.e. both x and y ordinates run from 0 to 1,  with an arc drawn with centre at (0, 0) from (0, 1) to (1, 0), i.e. it has a radius of 1. If darts are randomly thrown at the paper then approximately the ratio of arc area / square area is the number of darts inside arc / total number of darts. From which Pi can be approximated as 4 times the area ratio. Using the Reactive Collection Library this is:
@@ -245,7 +245,6 @@ Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEach
   1. If a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.) Whilst it would be possible to fix this, it would be a noticable performance overhead and therefore this option of items from multiple subscriptions is chosen as the 'lesser of the evils'! See `testKeepProducingBufferSizeItemsAfterCancel` in `ReactiveCollectionTests.swift` for an example.
 
 ## Roadmap
-  3. Add `filter`.
   4. Add `clone`.
   5. Latest value after timeout instead of timeout error, `TimeoutFutureSubscriber` - name? How does it fit with naming convention.
   6. Add `Fork` and `Join` `Processors` to enable:

@@ -67,7 +67,25 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(8, result)
     }
     
-
+    
+    func testFilter() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed < 7 ? seed : nil
+        }
+        let processor = FilterSeededProcessor(initialSeed: 0) { (count: inout Int, _: Int) in
+            count += 1
+            return count % 3 == 0
+        }
+        let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(11, result)
+    }
+    
+    
     // MARK: Coverage tests
     
     func testUsefulForDebugging() {
@@ -84,7 +102,7 @@ class ReactiveCollectionTests: XCTestCase {
     }
     
     func testKeepProducingBufferSizeItemsAfterCancel() {
-        let bufferSize = 2
+        let bufferSize: UInt64 = 2
         let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
             seed += 1
             return seed < 3 * bufferSize ? seed : nil
@@ -772,33 +790,6 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = N0Subscriber()
         publisher ~~> subscriber
         publisher ~~> subscriber // Can subscribe 2nd time since 1st subscription cancelled
-    }
-    
-    func testRequestNegativeItems() {
-        let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        class NNegativeSubscriber: Subscriber {
-            var isError  = false
-            
-            func onComplete() {
-                XCTFail("Should not be called")
-            }
-            
-            func on(error: Error) {
-                isError = true
-            }
-            
-            func on(next: Character) {
-                XCTFail("Should not be called")
-            }
-            
-            func on(subscribe: Subscription) {
-                subscribe.request(-1) // Check that a request of -1 causes an error.
-            }
-        }
-        let subscriber = NNegativeSubscriber()
-        publisher ~~> subscriber
-        XCTAssertTrue(subscriber.isError)
     }
     
     // MARK: Templates (in case needed in future).

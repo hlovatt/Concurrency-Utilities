@@ -104,17 +104,7 @@ public protocol IteratorPublisherBase: PublisherBase, Subscription {
     var _outputDispatchQueue: DispatchQueue { get }
     
     /// Number of additional items requested but not yet in production.
-    var _additionalRequestedItems: Atomic<Int> { get }
-    
-    /// Called to request `n` more items to be produced.
-    /// Schedules the production of items in blocks of upto `bufferSize` units.
-    ///
-    /// - parameter n: The number of additional items requested.
-    func request(_ n: Int)
-    
-    /// Cancel the subscription and cancel any outstanding item production on a best efforts basis, i.e. additional items may be produced before the cancellation takes effect.
-    /// Items are produced in upto `bufferSized` blocks and the current block will keep producing items after cancelleation, but a scheduled but unstarted block will be cancelled.
-    func cancel()
+    var _additionalRequestedItems: Atomic<UInt64> { get }
 }
 
 public extension IteratorPublisherBase {
@@ -127,54 +117,54 @@ public extension IteratorPublisherBase {
     /// Schedules the production of items in blocks of upto `bufferSize` units.
     ///
     /// - parameter n: The number of additional items requested.
-    func request(_ n: Int) {
+    func request(_ n: UInt64) {
         guard n != 0 else { // n == 0 is same as cancel.
             cancel()
             return
         }
-        _outputSubscriber.update { outputSubscriberOptional in
-            guard let outputSubscriber = outputSubscriberOptional else { // Guard against already finished.
-                return nil // Can't hink how to test this!
+        guard _outputSubscriber.value != nil else { // Cannot request without a subscriber.
+            return
+        }
+        _additionalRequestedItems.update { current in
+            if current == 0 {
+                _outputDispatchQueue.async(execute: producer())
             }
-            guard n > 0 else { // Guard against -ve n.
-                outputSubscriber.on(error: PublisherErrors.cannotProduceRequestedNumberOfItems(numberRequested: n, reason: "Negative number of items not allowed."))
-                return nil  // Completed.
-            }
-            _additionalRequestedItems.update { old in
-                guard old == 0 else { // Check if need to start a new production run, i.e. old == 0.
-                    return old + n // Coalesce outstanding requests.
+            let total = current &+ n
+            return total < n ?
+                UInt64.max : // Saturates to `UInt64.max`.
+                total
+        }
+    }
+    
+    private func producer() -> () -> Void {
+        return {
+            var numberOfItems = self._additionalRequestedItems.value
+            while true {
+                var count = numberOfItems
+                guard count != 0, let outputSubscriber = self._outputSubscriber.value else {
+                    return // Finished producing.
                 }
-                func producer(numberOfItems: Int) -> () -> Void {
-                    return {
-                        var count = numberOfItems
-                        do {
-                            while count > 0, let item = try self._next() {
-                                outputSubscriber.on(next: item)
-                                count -= 1
-                            }
-                        } catch {
-                            outputSubscriber.on(error: error) // Report an error from next method.
-                            self.cancel() // Cancel remaining queued production and mark this subscription as complete.
-                            return
-                        }
-                        guard count == 0 else { // Complete because `_next` must have returned `nil` and hence `count > 0`?
-                            outputSubscriber.onComplete() // Tell subscriber that subscription is completed.
-                            self.cancel() // Cancel remaining production and mark this subscription as complete.
-                            return
-                        }
-                        self._additionalRequestedItems.update { current in
-                            let outstanding = current - numberOfItems
-                            if outstanding > 0 {
-                                self._outputDispatchQueue.async(execute: producer(numberOfItems: outstanding))
-                            }
-                            return outstanding // Producing all the requested items.
-                        }
+                do {
+                    while count > 0, let item = try self._next() {
+                        outputSubscriber.on(next: item)
+                        count -= 1
                     }
+                } catch {
+                    outputSubscriber.on(error: error) // Report an error from next method.
+                    self.cancel() // Cancel remaining queued production and mark this subscription as complete.
+                    return
                 }
-                _outputDispatchQueue.async(execute: producer(numberOfItems: n))
-                return n // Producing all the requested items.
+                guard count == 0 else { // Complete because `_next` must have returned `nil` and hence `count > 0`?
+                    outputSubscriber.onComplete() // Tell subscriber that subscription is completed.
+                    self.cancel() // Cancel remaining production and mark this subscription as complete.
+                    return
+                }
+                numberOfItems = self._additionalRequestedItems.update { current in
+                    current > numberOfItems ?
+                        current - numberOfItems :
+                        0 // Must have been cancelled whilst producing the items.
+                }
             }
-            return outputSubscriberOptional
         }
     }
     
@@ -190,7 +180,7 @@ public extension IteratorPublisherBase {
 
 /// A convenience class for implementing `IteratorPublisherBase`; it provides all the stored properties.
 ///
-/// - warning: `next` must be overridden because the default implementation throws a fatal error.
+/// - warning: `_next` must be overridden because the default implementation throws a fatal error.
 ///
 /// - parameters
 ///   - O: The type of the output items produced.
@@ -201,14 +191,14 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
     
     private(set) public var _outputDispatchQueue: DispatchQueue
     
-    public let _additionalRequestedItems = Atomic(0)
+    public let _additionalRequestedItems = Atomic<UInt64>(0)
     
     /// A convenience class for implementing `IteratorPublisherBase`; it provides all the stored properties.
     ///
     /// - parameters:
-    ///   - qos: Quality of service for the dispatch queue used to sequence items and produce items in the background (default `DispatchQOS.default`).
-    public init(qos: DispatchQoS = .default) {
-        _outputDispatchQueue = DispatchQueue(label: "IteratorPublisherClassBase Serial Queue \(UniqueNumber.next)", qos: qos)
+    ///   - dispatchQueue: Dispatch queue used to produce items in the background (default `DispatchQueue.global()`).
+    public init(dispatchQueue: DispatchQueue = DispatchQueue.global()) {
+        _outputDispatchQueue = dispatchQueue
     }
     
     /// Default implementation throws a fatal error and *must* be overridden.
@@ -372,9 +362,9 @@ public protocol RequestorSubscriberBase: SubscriberBase {
     /// Called when a new input subscription is requested.
     func _handleNewInputSubscription()
     
-    var _inputBufferSize: Int { get }
+    var _inputBufferSize: UInt64 { get }
     
-    var _inputCountToRefill: Int { get set }
+    var _inputCountToRefill: UInt64 { get set }
 }
 
 public extension RequestorSubscriberBase {
@@ -430,10 +420,10 @@ enum FutureSubscriberErrors: Error {
 ///   - R: The result type of the accumulation.
 open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     /// The number of items to request at a time.
-    public let _inputBufferSize: Int
+    public let _inputBufferSize: UInt64
     
     /// The number of outstanding items in the current request (there is also an additional request of `bufferSize` with producer, therefore producer is producing `coutToRefill + bufferSize` items).
-    public var _inputCountToRefill = 0
+    public var _inputCountToRefill: UInt64 = 0
     
     /// The subscription, if there is one.
     public let _inputSubscription = Atomic<Subscription?>(nil)
@@ -444,8 +434,6 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     /// A base class (needs sub-classing to do anything useful) for a `Subscriber` that is also a `Future`.
     /// It takes items from its subscription and passes them to its `next` method which processes each item and when completed the result is obtained from property `result` and returned via `get` and/or `status`.
     ///
-    /// - precondition: `bufferSize` must be > 0.
-    ///
     /// - parameters:
     ///   - timeout: The time that `get` will wait before returning `nil` and setting `status` to a timeout error (default `Futures.defaultTimeout`).
     ///   - bufferSize:
@@ -454,7 +442,7 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     ///     As is typical of subscribers, this subscriber always requests lots of `bufferSize` items and initially requests two lots of items so that there is always two lots of items in flight.
     ///     Tests for cancellation are only performed every `bufferSize` items, therefore there is a compromise between a large `bufferSize` to maximize throughput and a small `bufferSize` to maximise responsiveness.
     ///     The default `bufferSize` is `ReactiveStreams.defaultBufferSize`.
-    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: Int = ReactiveStreams.defaultBufferSize) {
+    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: UInt64 = ReactiveStreams.defaultBufferSize) {
         switch timeout {
         case .nanoseconds(let ns):
             _timeoutTime = Date(timeIntervalSinceNow: Double(ns) / Double(1_000_000_000))
@@ -467,7 +455,6 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
         case .never:
             _timeoutTime = Date.distantFuture
         }
-        precondition(bufferSize > 0, "Buffer size must be > 0, is \(bufferSize)") // Can't test a precondition.
         self._inputBufferSize = bufferSize
     }
     
@@ -652,7 +639,7 @@ public extension ProcessorBase {
     }
     
     /// Default implementation passes the request for more items from the output subscription onto the input subscription.
-    func request(_ n: Int) {
+    func request(_ n: UInt64) {
         guard _outputSubscriber.value != nil else {
             fatalError("`request` called without a subscriber to the output.") // Can't test a fatal error.
         }

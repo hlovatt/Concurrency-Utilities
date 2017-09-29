@@ -237,7 +237,7 @@ public protocol Subscription: AnyObject {
     /// A request for zero items is the same as calling `cancel`.
     ///
     /// - parameter n: The strictly positive number of items to requests from the upstream `Publisher`.
-    func request(_ n: Int)
+    func request(_ n: UInt64)
 }
 
 /// A failed subscription Singleton, used as the agrument for `Subscriber.on(subscribe:)` when a subscription attempt fails.
@@ -255,7 +255,7 @@ public final class FailedSubscription: Subscription {
     
     public func cancel() {}
     
-    public func request(_ _: Int) {}
+    public func request(_ _: UInt64) {}
 }
 
 /// Functions and properties that are useful in conjunction with Reactive Streams (inside an enum to give them their own namespace).
@@ -263,5 +263,5 @@ public enum ReactiveStreams {
     /// Suggested default buffer size for `Publisher`s and `Subscriber`s.
     ///
     /// - note: The current implementation is 256.
-    public static let defaultBufferSize = 256
+    public static let defaultBufferSize: UInt64 = 256
 }
