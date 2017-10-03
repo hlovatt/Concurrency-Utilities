@@ -48,6 +48,11 @@ public enum Futures {
     /// - note: The current implementation is 1 second.
     public static let defaultTimeout = DispatchTimeInterval.seconds(1)
     
+    /// Suggested timer leeway.
+    ///
+    /// - note: The current implementation is 10 milli-seconds.
+    public static let defaultTimerLeeway = DispatchTimeInterval.milliseconds(10)
+    
     /// Suggested maximum sleep time whilst waiting for a timeout before checking for termination.
     ///
     /// - note: The current implementation is 1/4 second.
@@ -174,7 +179,7 @@ public final class AsynchronousFuture<T>: Future<T> {
     
     private var terminateFuture = Atomic<TerminateFuture?>(nil) // Set in foreground, read in background.
     
-    private init(queue: DispatchQueue = .global(), timeout: DispatchTimeInterval = Futures.defaultTimeout, calculation: @escaping (_ terminateFuture: () throws -> Void) -> FutureStatus<T>) {
+    private init(queue: DispatchQueue, timeout: DispatchTimeInterval, calculation: @escaping (_ terminateFuture: () throws -> Void) -> FutureStatus<T>) {
         self.timeoutTime = DispatchTime.now() + timeout
         super.init() // Have to complete initialization before result can be calculated.
         queue.async { // Deliberately holds a strong reference to self, so that a future can be side effecting.

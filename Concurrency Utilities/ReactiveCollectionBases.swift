@@ -10,15 +10,12 @@ import Foundation
 
 // MARK: Base `Publisher`s.
 
-/// Base protocol for publishers that ensures there is only ever one subscription.
+/// Base protocol for publishers that ensures there is only ever one output subscription.
 ///
 /// - warning:
 ///   - The *only* method/property intended for use by a client (the programmer using an instance of this class) is method `subscribe`; which is best called using operator `~~>` since that emphasizes that the other methods are not for client use.
 ///   - If multiple subscriptions are attempted; subsequent subscriptions are rejected with their `on(eror:)` method called with `PublisherErrors.subscriptionRejected(reason:)`, but the original subscription continues.
 ///   - This protocol is not thread safe (it makes no sense to share a producer since Reactive Streams are an alternative to dealing with threads directly!).
-///
-/// - note:
-///   - This class does not provide buffering, but a derived class might.
 public protocol PublisherBase: Publisher {
     /// Return the output subscription (there is only ever one at a time).
     var _outputSubscription: Subscription { get }
@@ -87,7 +84,6 @@ public extension PublisherBase {
 ///
 /// - note:
 ///   - Each subscriber receives all of the items individually (provided that the `next` method supports multiple traversal).
-///   - This class does not provide buffering, but a derived class might.
 public protocol IteratorPublisherBase: PublisherBase, Subscription {
     /// Produces next item or `nil` if no more items.
     ///
@@ -114,7 +110,6 @@ public extension IteratorPublisherBase {
     }
 
     /// Called to request `n` more items to be produced.
-    /// Schedules the production of items in blocks of upto `bufferSize` units.
     ///
     /// - parameter n: The number of additional items requested.
     func request(_ n: UInt64) {
@@ -123,16 +118,21 @@ public extension IteratorPublisherBase {
             return
         }
         guard _outputSubscriber.value != nil else { // Cannot request without a subscriber.
-            return
+            return // Can't think how to test!
         }
         _additionalRequestedItems.update { current in
             if current == 0 {
                 _outputDispatchQueue.async(execute: producer())
             }
             let total = current &+ n
-            return total < n ?
-                UInt64.max : // Saturates to `UInt64.max`.
-                total
+            guard total >= n else {
+                _outputSubscriber.update { outputSubscriberOptional in
+                    outputSubscriberOptional?.on(error: PublisherErrors.cannotProduceRequestedNumberOfItems(numberRequested: n, reason: "More than `UInt64.max` items requested or in production."))
+                    return nil // Cancel the subscription. Can't call cancel because updating `_additionalRequestedItems`.
+                }
+                return 0
+            }
+            return total
         }
     }
     
@@ -169,7 +169,7 @@ public extension IteratorPublisherBase {
     }
     
     /// Cancel the subscription and cancel any outstanding item production on a best efforts basis, i.e. additional items may be produced before the cancellation takes effect.
-    /// Items are produced in upto `bufferSized` blocks and the current block will keep producing items after cancelleation, but a scheduled but unstarted block will be cancelled.
+    /// Items are produced in upto `requestSize`d blocks and the current block will keep producing items after cancelleation, but a scheduled but unstarted block will be cancelled.
     func cancel() {
         _outputSubscriber.update { _ in
             _additionalRequestedItems.value = 0
@@ -220,9 +220,9 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
 ///   - There are *no* methods/properties intended for use by a client (the programmer using an instance of this class); the client *only* passes the instance to the `subscribe` method of a `Publisher`, which is best accomplished by `publisher ~~> subscriber`.
 ///
 /// - note:
-///   - A new successful subscription causes `handleNewSubscription` to be called; the default implementation of which does nothing.
+///   - A new successful subscription causes `_handleAndRequestFrom(newInputSubscription:)` to be called; the default implementation of which does nothing.
 ///   - Multiple subscriptions, errors from the subscription, and completed subscriptions all cause the current subscription to be cancelled and freed (set to `nil`) and call there relevent handlers (see point below); but take *no* further action.
-///   - Override methods `handleMultipleSubscriptionError()`, `handleOn(error: Error)`, `handleOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
+///   - Override methods `_handleMultipleInputSubscriptionError()`, `_handleInputSubscriptionOn(error: Error)`, `_handleInputSubscriptionOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
 ///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
 ///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
 public protocol SubscriberBase: Subscriber {
@@ -339,18 +339,17 @@ public extension SubscriberBase {
     }
 }
 
-/// A partial implementation of `Subscriber` protocol (needs further implementation to do anything useful) that handles its one at a time subscription and instigates requests for `bufferSize` items from its subscription.
-/// Itially the class requests two lots of `bufferSize` items and then subsequently one lot; this ensures that there are always two lots of items in flow (to maximize througput).
-/// Because the class requests two lots of `bufferSize` items a buffering sub-class would normally use two buffers each of `bufferSize` to hold in-flight items; when one buffer is finished it can be cleared (and its capacity retained) in a single operation, which is highly efficient.
+/// A partial implementation of `Subscriber` protocol (needs further implementation to do anything useful) that handles its one at a time subscription and instigates requests for `requestSize` items from its subscription.
+/// Itially the class requests two lots of `requestSize` items and then subsequently one lot; this ensures that there are always two lots of items in flow (to maximize througput).
 ///
 /// - warning:
 ///   - `Subscriber`s are not thread safe, since they are an alternative to dealing with threads directly and therefore it makes no sense to share them between threads.
 ///   - There are *no* methods/properties intended for use by a client (the programmer using an instance of this class), the client *only* passes the instance to the `subscribe` method of a `Publisher`, which is best accomplished using `publisher ~~> subscription`.
 ///
 /// - note:
-///   - A new successful subscription causes `handleNewSubscription` to be called; the default implementation of which does nothing.
+///   - A new successful subscription causes `_handleNewInputSubscription` to be called; the default implementation of which does nothing.
 ///   - Multiple subscriptions, errors from the subscription, and completed subscriptions all cause the current subscription to be cancelled and freed (set to `nil`) and call there relevent handlers (see point below); but take *no* further action.
-///   - Override methods `handleMultipleSubscriptionError()`, `handleOn(error: Error)`, `handleOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
+///   - Override methods `_handleMultipleInputSubscriptionError()`, `_handleInputSubscriptionOn(error: Error)`, `_handleInputSubscriptionOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
 ///   - Completion occurs when the subscription signals completion (it calls `onComplete()`) and the subscription should not call any methods after that, but this is not enforced (see next point for why).
 ///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
 public protocol RequestorSubscriberBase: SubscriberBase {
@@ -362,31 +361,31 @@ public protocol RequestorSubscriberBase: SubscriberBase {
     /// Called when a new input subscription is requested.
     func _handleNewInputSubscription()
     
-    var _inputBufferSize: UInt64 { get }
+    var _inputRequestSize: UInt64 { get }
     
-    var _inputCountToRefill: UInt64 { get set }
+    var _inputCountToRequest: UInt64 { get set }
 }
 
 public extension RequestorSubscriberBase {
     /// Default implementation does nothing.
     func _handleNewInputSubscription() {} // Can't be bothered to test.
     
-    /// Default implementation requests `bufferSize` items from subscription when current request is exhausted, calls the `next` mthod to process the next item, and throws any errors.
+    /// Default implementation requests `requestSize` items from subscription when current request is exhausted, calls the `next` mthod to process the next item, and throws any errors.
     func _consumeAndRequest(item: InputT) throws {
-        _inputCountToRefill -= 1
-        if _inputCountToRefill <= 0 { // Request more items when `bufferSize` items 'accumulated'.
-            _inputCountToRefill = _inputBufferSize
-            _inputSubscription.value?.request(_inputBufferSize)
+        _inputCountToRequest -= 1
+        if _inputCountToRequest <= 0 { // Request more items when `requestSize` items 'accumulated'.
+            _inputCountToRequest = _inputRequestSize
+            _inputSubscription.value?.request(_inputRequestSize)
         }
         try _consume(item: item) // Process the next item.
     }
     
-    /// Default implementation requests two lots of `bufSize` items from the subscription, so that one lot is always in-flight, if the subscription is accepted and returns the acceptance status from `handleNewSubscription`.
+    /// Default implementation requests two lots of `bufSize` items from the subscription, so that one lot is always in-flight, if the subscription is accepted and returns the acceptance status from `_handleNewInputSubscription`.
     func _handleAndRequestFrom(newInputSubscription: Subscription) {
         _handleNewInputSubscription()
-        _inputCountToRefill = _inputBufferSize
-        newInputSubscription.request(_inputBufferSize) // Start subscription
-        newInputSubscription.request(_inputBufferSize) // Ensure that two lots of items are always in flight.
+        _inputCountToRequest = _inputRequestSize
+        newInputSubscription.request(_inputRequestSize) // Start subscription
+        newInputSubscription.request(_inputRequestSize) // Ensure that two lots of items are always in flight.
     }
 }
 
@@ -420,14 +419,13 @@ enum FutureSubscriberErrors: Error {
 ///   - R: The result type of the accumulation.
 open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     /// The number of items to request at a time.
-    public let _inputBufferSize: UInt64
+    public let _inputRequestSize: UInt64
     
-    /// The number of outstanding items in the current request (there is also an additional request of `bufferSize` with producer, therefore producer is producing `coutToRefill + bufferSize` items).
-    public var _inputCountToRefill: UInt64 = 0
+    /// The number of outstanding items in the current request (there is also an additional request of `requestSize` with producer, therefore producer is producing `_inputCountToRequest + requestSize` items).
+    public var _inputCountToRequest: UInt64 = 0
     
     /// The subscription, if there is one.
     public let _inputSubscription = Atomic<Subscription?>(nil)
-    
     
     // MARK: init
     
@@ -436,13 +434,12 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     ///
     /// - parameters:
     ///   - timeout: The time that `get` will wait before returning `nil` and setting `status` to a timeout error (default `Futures.defaultTimeout`).
-    ///   - bufferSize:
-    ///     The buffer for this subscriber is the given `initialResult` (which is typically a single value).
-    ///     Therefore this parameter is purely a tuning parameter to control the number of items requested at a time.
-    ///     As is typical of subscribers, this subscriber always requests lots of `bufferSize` items and initially requests two lots of items so that there is always two lots of items in flight.
-    ///     Tests for cancellation are only performed every `bufferSize` items, therefore there is a compromise between a large `bufferSize` to maximize throughput and a small `bufferSize` to maximise responsiveness.
-    ///     The default `bufferSize` is `ReactiveStreams.defaultBufferSize`.
-    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, bufferSize: UInt64 = ReactiveStreams.defaultBufferSize) {
+    ///   - requestSize:
+    ///     Tuning parameter to control the number of items requested at a time.
+    ///     As is typical of subscribers, this subscriber always requests lots of `requestSize` items and initially requests two lots of items so that there is always two lots of items in flight.
+    ///     Tests for cancellation are performed on average every `requestSize` items, therefore there is a compromise between a large `requestSize` to maximize throughput and a small `requestSize` to maximise responsiveness.
+    ///     The default `requestSize` is `ReactiveStreams.defaultRequestSize`.
+    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout, requestSize: UInt64 = ReactiveStreams.defaultRequestSize) {
         switch timeout {
         case .nanoseconds(let ns):
             _timeoutTime = Date(timeIntervalSinceNow: Double(ns) / Double(1_000_000_000))
@@ -455,18 +452,21 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
         case .never:
             _timeoutTime = Date.distantFuture
         }
-        self._inputBufferSize = bufferSize
+        self._inputRequestSize = requestSize
     }
     
     // MARK: Methods that must be overridden
     
     /// Consume the next item from the input subscription.
     /// Default implementation throws a fatal error, *must* be overridden.
+    ///
+    /// - parameter item: The next item from the input susbcription.
     open func _consume(item: T) throws {
         fatalError("Method must be overridden") // Can't test a fatal error.
     }
     
     /// Return the result so far (called when the accumulation is complete and its value stored in status and returned by `get`).
+    /// Default implementation throws a fatal error, *must* be overridden.
     open var _result: R {
         fatalError("Getter must be overridden.") // Can't test a fatal error.
     }
@@ -476,14 +476,7 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
     
     // MARK: Future properties and methods
     
-    private let _status = Atomic(FutureStatus<R>.running) // Set in background, read in foreground.
-    
-    private let _timeoutTime: Date
-    
-    public final override var status: FutureStatus<R> {
-        return _status.value
-    }
-    
+    /// Return the result or `nil` on error, timeout, or cancel.
     public final override var get: R? {
         while true { // Keep looping until completed, cancelled, timed out, or throws.
             switch _status.value {
@@ -505,6 +498,13 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
                 return nil
             }
         }
+    }
+    public let _status = Atomic(FutureStatus<R>.running) // Set in background, read in foreground.
+    
+    public let _timeoutTime: Date
+    
+    public final override var status: FutureStatus<R> {
+        return _status.value
     }
     
     public final override func cancel() {
@@ -567,15 +567,14 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
 
 // MARK: Base `Processor`s.
 
-/// Base class for processors that take items from its input subscription, process them using the `map` method, and make the new items available via its output subscription.
+/// Base protocol for processors that take items from its input subscription, process them using the `_map` method, and make the new items available via its output subscription.
 ///
 /// - warning:
 ///   - When a subscriber subscribes to this class it is passed `self` (because this class is its own subscription).
 ///     Therefore each subscriber has to `nil` out its reference to the subscription when it receives either `on(error: Item)` or `onComplete()`, otherwise there will be a retain cycle memory leak.
 ///   - If either methods `cancel` or `request` (from `Subscription`) are called when there is no subscriber the result is a fatal error.
 ///   - The *only* method/property intended for use by a client (the programmer using an instance of this class) is method `subscribe`; however an instance of this class may be passed to the `subscribe` method of another `Publisher`.
-///   Passing the instance to the publisher is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
-///   - If multiple subscriptions to this processor are attempted; subsequent subscriptions are rejected with their `on(eror:)` method called with `PublisherErrors.subscriptionRejected(reason:)`, but the original subscription continues.
+///   Passing the instance to the publisher or subscribing to its output is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
 ///   - `Processor`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
 ///
 /// - note:
@@ -586,7 +585,12 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
 ///   - If an attempt is made to subscribe this processor to multiple publishers then the existing input subscription is cancelled and if there is an output subscription it is terminated with `PublisherErrors.existingSubscriptionTerminated`.
 ///   - If the input subscription completes then this class completes its output subscription.
 ///   - If the input subscription signals an error then this class signals the error to its output subscription.
-///   - If the `process` method throws then the error the error propagated to the output subscription and the input subscription is cancelled.
+///   - If the `_map` method throws then the error the error propagated to the output subscription and the input subscription is cancelled.
+///   - A new successful input subscription causes `_handleNewInputSubscription` to be called; the default implementation of which does nothing.
+///   - Multiple input subscriptions, errors from the input subscription, and a completed input subscriptions all cause the current input subscription to be cancelled and freed (set to `nil`) and call there relevent handlers (see point below); but take *no* further action.
+///   - Override methods `_handleMultipleInputSubscriptionError()`, `_handleInputSubscriptionOn(error: Error)`, `_handleInputSubscriptionOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
+///   - Completion occurs when the input subscription signals completion (it calls `onComplete()`) and the input subscription should not call any methods after that, but this is not enforced (see next point for why).
+///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
 ///   - The associated types are:
 ///     - InputT: The type of the input items.
 ///     - OutputT: The type of the output items.
@@ -598,7 +602,7 @@ public extension ProcessorBase {
         return self
     }
     
-    /// Default implementation terminates the existing input subscription, if there is one, with error `PublisherErrors.existingSubscriptionTerminated(reason: "...")`.
+    /// Default implementation terminates the existing output subscription, if there is one, with error `PublisherErrors.existingSubscriptionTerminated(reason: "...")`.
     func _handleMultipleInputSubscriptionError() {
         _outputSubscriber.update { outputSubscriberOptional in
             outputSubscriberOptional?.on(error: PublisherErrors.existingSubscriptionTerminated(reason: "Attempt to subscribe `Processor` to multiple publishers (in addition to this subscription)."))
@@ -606,7 +610,7 @@ public extension ProcessorBase {
         }
     }
     
-    /// Default implementation passes given error from the output subscription onto existing input subscription and terminates it, if there is one.
+    /// Default implementation passes given error from the input subscription onto existing output subscription and hense terminates it, if there is one.
     func _handleInputSubscriptionOn(error: Error) {
         _outputSubscriber.update { outputSubscriberOptional in
             outputSubscriberOptional?.on(error: error)
@@ -614,7 +618,7 @@ public extension ProcessorBase {
         }
     }
     
-    /// Default implementation terminates the existing input subscription, if there is one, with `onComplete()`.
+    /// Default implementation terminates the existing output subscription, if there is one, with `onComplete()`.
     func _handleInputSubscriptionOnComplete() {
         _outputSubscriber.update { outputSubscriberOptional in
             outputSubscriberOptional?.onComplete()
@@ -629,16 +633,21 @@ public extension ProcessorBase {
             ""
     }
     
-    /// Default implementation cancels the input subscription and `nils` out reference to it and the output subscriber, if they exist.
+    /// Default implementation cancels the input subscription and `nils` out the reference to it, if it has one, and if there is an output subscriber `nil`s it also and if there is no output subscriber throws a fatal error.
     func cancel() {
-        _outputSubscriber.value = nil
-        _inputSubscription.update { inputSubscription in
-            inputSubscription?.cancel()
+        _outputSubscriber.update { outputSubscriberOptional in
+            guard outputSubscriberOptional != nil else {
+                fatalError("`cancel` called without a subscriber to the output.") // Can't test a fatal error.
+            }
+            return nil
+        }
+        _inputSubscription.update { inputSubscriptionOptional in
+            inputSubscriptionOptional?.cancel()
             return nil
         }
     }
     
-    /// Default implementation passes the request for more items from the output subscription onto the input subscription.
+    /// Default implementation passes the request for more items from the output subscription onto the input subscription and if there is no output subscriber throws a fatal error.
     func request(_ n: UInt64) {
         guard _outputSubscriber.value != nil else {
             fatalError("`request` called without a subscriber to the output.") // Can't test a fatal error.
@@ -649,7 +658,7 @@ public extension ProcessorBase {
 
 /// A convenience class for implementing `ProcessorBase`; it provides all the stored properties.
 ///
-/// - warning: `map` must be overridden because the default implementation throws a fatal error.
+/// - warning: `_consumeAndRequest(item:)` must be overridden because the default implementation throws a fatal error.
 ///
 /// - parameters
 ///   - I: The type of the input items to be processed.
@@ -679,3 +688,88 @@ open class ProcessorClassBase<I, O>: ProcessorBase {
     /// Resets the output subscription when a new output subscription starts, default implementation does nothing.
     open func _resetOutputSubscription() {}
 }
+
+/// Base protocol for processors that take items from its input subscription and passes every item to each of its output subscriptions.
+/// The output subscribers only get items from the input that arrive after they have joined.
+/// If an input item arrives and there are no output subscriptions it is disguarded.
+/// An `on(error: Item)` or `onComplete()` from the input is passed to all subscribers.
+///
+/// - warning:
+///   - When a subscriber subscribes to this class it is passed s unique subscription.
+///     Therefore each subscriber has to `nil` out its reference to the subscription when it receives either `on(error: Item)` or `onComplete()`, otherwise the subscription will be retained.
+///   - If either methods `cancel` or `request` (from any of the `Subscription`s) are called when there is no matching subscriber the result is a fatal error.
+///   - The *only* method/property intended for use by a client (the programmer using an instance of this class) is method `subscribe`; however an instance of this class may be passed to the `subscribe` method of another `Publisher`.
+///   Passing the instance to the publisher and subscribing to its output is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
+///   - `Processor`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///
+/// - note:
+///   - An output subscription is refused if there is no input subscription.
+///   - When an output subscription requests items then this class requests items from its input subscription.
+///   - If an attempt is made to subscribe this processor to multiple publishers then the existing input subscriptions are cancelled and if there is an output subscription it is terminated with `PublisherErrors.existingSubscriptionTerminated`.
+///   - If the input subscription completes then this class completes all its output subscriptions.
+///   - If the input subscription signals an error then this class signals the error to all its output subscriptions.
+///   - A new successful input subscription causes `_handleNewInputSubscription` to be called; the default implementation of which does nothing.
+///   - Multiple input subscriptions, errors from the input subscription, and a completed input subscription all cause the current input subscription to be cancelled and freed (set to `nil`) and call there relevent handlers (see point below); but take *no* further action.
+///   - Override methods `_handleMultipleInputSubscriptionError()`, `_handleInputSubscriptionOn(error: Error)`, `_handleInputSubscriptionOnComplete()` to control errors and completion actions, the defaults all throw fatal errors.
+///   - Completion occurs when the input subscription signals completion (it calls `onComplete()`) and the input subscription should not call any methods after that, but this is not enforced (see next point for why).
+///   - The contract for `on(next: Item)` requires that this method continues to allow calls after cancellation etc. so that 'in-transit' items do not cause thread locks and therefore this method is not locked out and therefore neither are the other 'on' methods (though they do nothing).
+///   - The associated types are:
+///     - InputT: The type of the items (input and output are the same type).
+///     - OutputT: The type of the output items (input and output are the same type).
+//public protocol ForkProcessorBase: Processor, SubscriberBase, Subscription where InputT == OutputT {}
+//
+//public extension ForkProcessorBase {
+//    /// Default implementation terminates the existing output subscription, if there is one, with error `PublisherErrors.existingSubscriptionTerminated(reason: "...")`.
+//    func _handleMultipleInputSubscriptionError() {
+//        _outputSubscriber.update { outputSubscriberOptional in
+//            outputSubscriberOptional?.on(error: PublisherErrors.existingSubscriptionTerminated(reason: "Attempt to subscribe `Processor` to multiple publishers (in addition to this subscription)."))
+//            return nil
+//        }
+//    }
+//
+//    /// Default implementation passes given error from the output subscription onto existing input subscription and terminates it, if there is one.
+//    func _handleInputSubscriptionOn(error: Error) {
+//        _outputSubscriber.update { outputSubscriberOptional in
+//            outputSubscriberOptional?.on(error: error)
+//            return nil
+//        }
+//    }
+//
+//    /// Default implementation terminates the existing input subscription, if there is one, with `onComplete()`.
+//    func _handleInputSubscriptionOnComplete() {
+//        _outputSubscriber.update { outputSubscriberOptional in
+//            outputSubscriberOptional?.onComplete()
+//            return nil
+//        }
+//    }
+//
+//    /// Default implementation only accepts an output subscriber if the processor already has an input subscription.
+//    var _isNewOutputSubscriberAccepted: String {
+//        return _inputSubscription.value == nil ?
+//            "Cannot have an output subscriber without an input subscription." :
+//        ""
+//    }
+//
+//    /// Default implementation cancels the input subscription and `nils` out reference to it and the output subscriber, if they exist.
+//    func cancel() {
+//        _outputSubscriber.update { outputSubscriberOptional in
+//            guard outputSubscriberOptional != nil else {
+//                fatalError("`cancel` called without a subscriber to the output.") // Can't test a fatal error.
+//            }
+//            return nil
+//        }
+//        _inputSubscription.update { inputSubscriptionOptional in
+//            inputSubscriptionOptional?.cancel()
+//            return nil
+//        }
+//    }
+//
+//    /// Default implementation passes the request for more items from the output subscription onto the input subscription.
+//    func request(_ n: UInt64) {
+//        guard _outputSubscriber.value != nil else {
+//            fatalError("`request` called without a subscriber to the output.") // Can't test a fatal error.
+//        }
+//        _inputSubscription.value!.request(n)
+//    }
+//}
+

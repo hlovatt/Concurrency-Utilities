@@ -40,7 +40,9 @@ public final class Atomic<T> {
     private var _value: T
     
     /// Create and initialize a new atomic.
-    /// - parameter initialValue: The initial value of the variable.
+    ///
+    /// - parameters:
+    ///   - initialValue: The initial value of the variable.
     public init(_ initialValue: T) {
         _value = initialValue
         queue = DispatchQueue(label: "Atomic Serial Queue \(UniqueNumber.next)", qos: DispatchQoS.userInitiated)

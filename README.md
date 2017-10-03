@@ -126,6 +126,7 @@ Reactive Streams are dynamic (can be reconfigured on the fly), can signal errors
   - *Item:* What is transferred from a producer, optionally via a processor, to a subscriber.
   - *`Processor`:* Represents a processing stage, which obtains items from an upstream producer, processes these items, and supplies the processed items to a downstream subscriber (i.e. a processor is both a producer, for downstream subscribers, and a subscriber to upstream producers).
   - *`Producer`:* Provider of a potentially unbounded number of sequenced items, producing them according to the demand received from its subscriber(s).
+  - *Request:* Made by a subscriber, via its subscription, to a producer to produce `n` more items.
   - *`Subscriber`:* Subscribe to a processor and receive from the processor a subscription, using this subscription the subscriber controls the flow of items from the producer to the subscriber.
   - *`Subscription`:* 'Contract' between a producer and subscriber for the supply of items, in particular the subscription regulates the rate of flow of items and signals completion, errors, and cancellation.
 
@@ -164,7 +165,7 @@ On top of the specification's protocols the library provides implementations of 
   - Like the Swift Collection Library the action of these classes is specified using a trailing closure, e.g. `ReduceFutureSubscriber`'s trailing closure accumulates the results.
   - There is a logical naming convention going from most important to least important part of the name left to right of `[<SwiftCollectionName> | <Other>][Future]?[Seeded]?[Producer | Processor | Subscriber | ForkProcessor | JoinProcessor]`, where:
   
-    - `<SwiftCollectionName> | <Other>`: The method/ptotocol name of the nearest equivalent in the Swift Collection Library (e.g. `forEach` from `Sequence` for `ForEachProducer`) or another name if nothing is suitable (e.g. `ClockedForkProcessor`). The `Other` part-name ends in `ForkProcessor` for processors that fork a single flow into multiple and in `JoinProcessor` for the reverse of joing multiple flows into one.
+    - `<SwiftCollectionName> | <Other>`: The method/ptotocol name of the nearest equivalent in the Swift Collection Library (e.g. `forEach` from `Sequence` for `ForEachProducer`) or another name if nothing is suitable (e.g. `ClockedForkProcessor`). `Other` is when nothing comparable exists in `SwiftCollectionName`, e.g. `TimeoutFutureSubscriber`.
     - `Future`: *If* the class is also a `Future`; e.g. `ReduceFutureSubscriber` which gives access to the result of the reduction using  future's interface, in particular `get` or `~~>?`.
     - `Seeded`: Is appended to the name *if* the constructor has an `initialSeed` argument that is not present in the equivalent Swift Collection method. The seed is used as working storage for the trailing closure and is passed in as an `inout` parameter. EG `IteratorProducerSeeded` passes its seed to its `nextItem` closure, the equivalent in Swift's Collection Library is `IteratorProtocol` which would be implemented in a `struct`/`class` and the implementation would provide the storage instead of seed. 'Seeded' is styled after the Swift Collection `reduce(into: initialResult) { ... }` method, where the `into` argument is in this case both the seed and the final rersult.
     - `Producer | Processor | Subscriber | ForkProcessor | JoinProcessor`: Describe the role of the class. Producers are at the start of a flow, processors in the middle, and subscribers at the end. Typical usage is `producer ~~> processor ~~> subscriber`. `ForkProcessor` are processors that fork a single stream into multiple and  `JoinProcessor` are the reverse of joing multiple streams into one (`Fork`s and `Join`s are always `Processors` because they have, by definition, an input and an output).
@@ -185,7 +186,7 @@ Hello World using this library is:
 
 Note how the arguments to `ForEachProducer` and `ReduceFutureSubscriber` mimic those to similarly named methods in Swifts `Sequence` protocol, how `Subscriber`'s `~~>` is evocative of the process that is occurring, and how `Future`'s `~~>?` looks natural and controls execution and error reporting.
 
-`helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`). `Publisher`s produce items in the background via Grand Central Dispartch (GCD) queues and the items are passed to and processed by subsequent stages in the thread processing the queued production task. The production of items per task is specified by the *subscribers* `bufferSize` argument, since it is the subscriber that requests items to be produced. The queue that a producer is to use can be specified when constructing the producer.
+`helloWorldPublisher ~~> helloWorldSubscriber` runs asynchronously and `~~>? helloWorldResult` waits for the result (`helloWorldResult` is both a `Future` and a `Subscriber`). `Publisher`s produce items in the background via Grand Central Dispartch (GCD) queues and the items are passed to and processed by subsequent stages in the thread processing the queued production task. The production of items per task is specified by the *subscribers* `requestSize` argument, since it is the subscriber that requests items to be produced. The queue that a producer is to use can be specified when constructing the producer.
 
 ### Processors
 Typically you would have intermediate stages in a calculation, `Processor`s that take an input and produce an output (these are similar to `Sequence`'s `map` and `filter` methods). The Monte Carlo method of approximating Pi estimates the ratio of the area of a square to the area of an arc. Consider a square piece of paper 1 by 1, i.e. both x and y ordinates run from 0 to 1,  with an arc drawn with centre at (0, 0) from (0, 1) to (1, 0), i.e. it has a radius of 1. If darts are randomly thrown at the paper then approximately the ratio of arc area / square area is the number of darts inside arc / total number of darts. From which Pi can be approximated as 4 times the area ratio. Using the Reactive Collection Library this is:
@@ -242,19 +243,19 @@ Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEach
     Where these protocols/classes introduce new methods and properties their names begin with `_`; treat these as protected methods, i.e. do not call them - they are part of the library. (Swift doesn't have the concept of a protected method. Similarly if the method is in a protocol there is no way to mark it as final, therefore read the documentation carefully to decide if it is suitable for overridding. Conversely if the method is defined in a class there is no way to mark it as abstract and so methods that would be abstract throw a fatal error.)
 
 ## Issues
-  1. If a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.) Whilst it would be possible to fix this, it would be a noticable performance overhead and therefore this option of items from multiple subscriptions is chosen as the 'lesser of the evils'! See `testKeepProducingBufferSizeItemsAfterCancel` in `ReactiveCollectionTests.swift` for an example.
+  1. If a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.) Whilst it would be possible to fix this, it would be a noticable performance overhead and therefore this option of items from multiple subscriptions is chosen as the 'lesser of the evils'! See `testKeepProducingRequestSizeItemsAfterCancel` in `ReactiveCollectionTests.swift` for an example.
 
 ## Roadmap
-  4. Add `clone`.
-  5. Latest value after timeout instead of timeout error, `TimeoutFutureSubscriber` - name? How does it fit with naming convention.
-  6. Add `Fork` and `Join` `Processors` to enable:
+  6. Add `SubscriptionTimeLimit` processor. Crossreference SubscriptionTimeLimit and ItemTimeout to explain difference. Use time limit to find default request size.
+  7. Add `Fork` and `Join` `Processors` to enable:
   
           randomCoordinate ~~> fork ~~> [
               countTotal,
               filterInside ~~> countInside
           ] ~~> join ~~> piEstimator ~~> rememberLast ~~>? result
           
-  7. Bidirectional streams/flows, e.g. simulating international, credit card transactions at Point Of Sale (POS) terminals:
+  8. Tagged request reply with timeout, `TaggedRequestReplyProcessor` - name? How does it fit with naming convention. Mateches a tagged request to a (tagged) reply and if no reply within timeout supplies a default reply and disguards any subsequent reply. Handles multiple 'in-flight' requests by keeping track of tags. Tags must be unique.
+  9. Bidirectional streams/flows, e.g. simulating international, credit card transactions at Point Of Sale (POS) terminals:
   
           let kyd = Currency(oneUSDIs: 0.82)
           let pab = Currency(oneUSDIs: 1.00)
@@ -287,7 +288,8 @@ Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEach
               posTerminal.get // Wait for each POS terminal simulation to finish.
           }
   
-  8. See if `DispatchWorkItem` would be a better implementation for `Future`.
+  10. See if `DispatchWorkItem` would be a better implementation for `Future`?
+  11. Is it worth providing non-seeded versions of `map` etc.?
 
 ## Copyright and License
 Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.

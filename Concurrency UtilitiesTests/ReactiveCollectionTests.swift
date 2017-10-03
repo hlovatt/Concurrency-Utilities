@@ -85,7 +85,6 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(11, result)
     }
     
-    
     // MARK: Coverage tests
     
     func testUsefulForDebugging() {
@@ -101,13 +100,77 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(3, result)
     }
     
-    func testKeepProducingBufferSizeItemsAfterCancel() {
-        let bufferSize: UInt64 = 2
+    func testTimoutOK() {
         let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
             seed += 1
-            return seed < 3 * bufferSize ? seed : nil
+            return seed <= 3 ? seed : nil
         }
-        let subscriber = ReduceFutureSubscriber(bufferSize: bufferSize, into: 3) { (result: inout Int, next: Int) in
+        let processor = ItemTimeoutProcessor<Int>()
+        let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(10, result)
+    }
+    
+    func testTimoutFail() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            Thread.sleep(forTimeInterval: 0.002)
+            seed += 1
+            return seed <= 3 ? seed : nil
+        }
+        let processor = ItemTimeoutProcessor<Int>(timeout: .milliseconds(1))
+        let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(-1, result)
+        switch subscriber.status {
+        case .threw(let error):
+            switch error as! TimeoutError {
+            case .timedOut:
+                break
+            }
+        default:
+            XCTFail("Should be `.threw`.")
+        }
+    }
+    
+    func testMoreThanUInt64MaxItemsRequested() {
+        let publisher = IteratorSeededPublisher(initialSeed: ()) { (seed: inout Void) -> Int? in
+            return 1
+        }
+        let processor = FilterSeededProcessor(initialSeed: ()) { (_: inout Void, next: Int) in
+            return false
+        }
+        let subscriber = ReduceFutureSubscriber(requestSize: UInt64.max / 2, into: 2) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(-1, result)
+        switch subscriber.status {
+        case .threw(let error):
+            switch error as! PublisherErrors {
+            case .cannotProduceRequestedNumberOfItems(let numberRequested, _):
+                XCTAssertEqual(1, numberRequested)
+            default:
+                XCTFail("Should be `.cannotProduceRequestedNumberOfItems`.")
+            }
+        default:
+            XCTFail("Should be `.threw`.")
+        }
+    }
+    
+    func testKeepProducingRequestSizeItemsAfterCancel() {
+        let requestSize: UInt64 = 2
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed < 3 * requestSize ? seed : nil
+        }
+        let subscriber = ReduceFutureSubscriber(requestSize: requestSize, into: 3) { (result: inout Int, next: Int) in
             Thread.sleep(forTimeInterval: 0.01) // Time delay to allow for cancel to happen.
             result += next
         }
@@ -520,7 +583,7 @@ class ReactiveCollectionTests: XCTestCase {
         let test = "Hello, world!"
         let publisher1 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
         let publisher2 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceFutureSubscriber(bufferSize: 1, into: "") { (_: inout String, _: Character) in
+        let subscriber = ReduceFutureSubscriber(requestSize: 1, into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.01) // Allow time for 2nd subscription.
         }
         publisher1 ~~> subscriber // Should succeed.
@@ -542,10 +605,10 @@ class ReactiveCollectionTests: XCTestCase {
         }
     }
     
-    func testReductionRefills() {
+    func testReductionRequests() {
         let test = "Hello, world!"
         let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let subscriber = ReduceFutureSubscriber(bufferSize: 1, into: "") { (result: inout String, next: Character) in
+        let subscriber = ReduceFutureSubscriber(requestSize: 1, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
         var result = "Failed!"
@@ -553,7 +616,7 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(test, result)
     }
     
-    func testOneIterationSequenceWithRefillAndFinishAtBufferBoundary() {
+    func testOneIterationSequenceWithRequestAndFinishAtRequestBoundary() {
         struct Test: Sequence, IteratorProtocol {
             var count = 0
             mutating func next() -> Int? {
@@ -564,7 +627,7 @@ class ReactiveCollectionTests: XCTestCase {
             }
         }
         let publisher = ForEachPublisher(sequence: Test())
-        let subscriber = ReduceFutureSubscriber(bufferSize: 4, into: "") { (result: inout String, next: Int) in
+        let subscriber = ReduceFutureSubscriber(requestSize: 4, into: "") { (result: inout String, next: Int) in
             result.append(next.description)
         }
         var result = "Failed!"
@@ -572,7 +635,7 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual("01234567", result)
     }
     
-    func testOneIterationSequenceWithFinishAtRefill() {
+    func testOneIterationSequenceWithFinishAtRequest() {
         struct Test: Sequence, IteratorProtocol {
             var count = 0
             mutating func next() -> Int? {
@@ -583,7 +646,7 @@ class ReactiveCollectionTests: XCTestCase {
             }
         }
         let publisher = ForEachPublisher(sequence: Test())
-        let subscriber = ReduceFutureSubscriber(bufferSize: 9, into: "") { (result: inout String, next: Int) in
+        let subscriber = ReduceFutureSubscriber(requestSize: 9, into: "") { (result: inout String, next: Int) in
             result.append(next.description)
         }
         var result = "Failed!"
