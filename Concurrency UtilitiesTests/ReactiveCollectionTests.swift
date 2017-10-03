@@ -85,22 +85,7 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(11, result)
     }
     
-    // MARK: Coverage tests
-    
-    func testUsefulForDebugging() {
-        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
-            seed += 1
-            return seed == 1 ? 1 : nil
-        }
-        let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
-            result += next
-        }
-        var result = -1
-        publisher ~~> subscriber ~~>? result
-        XCTAssertEqual(3, result)
-    }
-    
-    func testTimoutOK() {
+    func testTimeoutOK() {
         let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
             seed += 1
             return seed <= 3 ? seed : nil
@@ -114,7 +99,7 @@ class ReactiveCollectionTests: XCTestCase {
         XCTAssertEqual(10, result)
     }
     
-    func testTimoutFail() {
+    func testTimeoutFail() {
         let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
             Thread.sleep(forTimeInterval: 0.002)
             seed += 1
@@ -136,6 +121,88 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
+    }
+    
+    func testTimeLimitOK() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed <= 3 ? seed : nil
+        }
+        let processor = SubscriptionTimeLimitProcessor<Int>()
+        let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(10, result)
+    }
+    
+    func testTimLimitComplete() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            Thread.sleep(forTimeInterval: 0.002)
+            seed += 1
+            return seed <= 3 ? seed : nil
+        }
+        let processor = SubscriptionTimeLimitProcessor<Int>(timeLimit: .milliseconds(1))
+        let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> processor ~~> subscriber ~~>? result
+        XCTAssertEqual(4, result)
+        switch subscriber.status {
+        case .completed(_):
+            break
+        default:
+            XCTFail("Should be `.completed`.")
+        }
+    }
+    
+    // MARK: Performance tests.
+    
+    let performanceTestSize = 1_000_000_000
+
+//    func testPerformanceWithRequestSizeOf1() {
+//        self.measure {
+//            let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+//                seed += 1
+//                return seed <= self.performanceTestSize ? seed : nil
+//            }
+//            let subscriber = ReduceFutureSubscriber(requestSize: 1, into: 2) { (result: inout Int, next: Int) in
+//                result += next
+//            }
+//            var result = -1
+//            publisher ~~> subscriber ~~>? result
+//        }
+//    }
+//
+//    func testPerformanceWithMaxRequestSize() {
+//        self.measure {
+//            let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+//                seed += 1
+//                return seed <= self.performanceTestSize ? seed : nil
+//            }
+//            let subscriber = ReduceFutureSubscriber(requestSize: UInt64.max / 2, into: 2) { (result: inout Int, next: Int) in
+//                result += next
+//            }
+//            var result = -1
+//            publisher ~~> subscriber ~~>? result
+//        }
+//    }
+    
+    // MARK: Coverage tests.
+    
+    func testUsefulForDebugging() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed <= 3 ? seed : nil
+        }
+        let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
+            result += next
+        }
+        var result = -1
+        publisher ~~> subscriber ~~>? result
+        XCTAssertEqual(3, result)
     }
     
     func testMoreThanUInt64MaxItemsRequested() {

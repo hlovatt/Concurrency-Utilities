@@ -123,12 +123,16 @@ Reactive Steams are a standardised, Actor like, way to transfer items between as
 Reactive Streams are dynamic (can be reconfigured on the fly), can signal errors, can be cancelled, and use pull requests to control the number of items transferred. The terminology used is:
 
   - *Back pressure:* A subscriber controls the flow of items from a producer by requesting a number of items from the producer, if it stops requesting items then the producer must stop producing items (this is termed back pressure).
+  - *Complete:* When a flow finished normally (without cancellation or errors).
+  - *Cancel:* When a flow is cancelled.
+  - *Error:* When a flow finished abnormally and signals an error.
   - *Item:* What is transferred from a producer, optionally via a processor, to a subscriber.
   - *`Processor`:* Represents a processing stage, which obtains items from an upstream producer, processes these items, and supplies the processed items to a downstream subscriber (i.e. a processor is both a producer, for downstream subscribers, and a subscriber to upstream producers).
   - *`Producer`:* Provider of a potentially unbounded number of sequenced items, producing them according to the demand received from its subscriber(s).
   - *Request:* Made by a subscriber, via its subscription, to a producer to produce `n` more items.
   - *`Subscriber`:* Subscribe to a processor and receive from the processor a subscription, using this subscription the subscriber controls the flow of items from the producer to the subscriber.
   - *`Subscription`:* 'Contract' between a producer and subscriber for the supply of items, in particular the subscription regulates the rate of flow of items and signals completion, errors, and cancellation.
+  - *Terminate:* Any of: completion, cancellation, or error.
 
 The Reactive Stream standard defines just four protocols: `Processor`, `Producer`, `Subscriber`, and `Subscription`, which in turn define just seven methods. The methods are described in the [Reactive Streams Specification](https://github.com/reactive-streams/reactive-streams-jvm/blob/v1.0.1/README.md#specification). A summary of how the protocols and methods interact and in what sequence is shown diagramatically:
 
@@ -246,7 +250,6 @@ Typically you use the sequence like classes, `IteratorSeededPublisher`, `ForEach
   1. If a subscriber cancels its subscription, the producer keeps producing, and the subscriber subscribes to another producer whilst the 1st is still producing, then it will recieve items from both producers! (The Reactive Stream Specification allows producers to keep producing post cancellation.) Whilst it would be possible to fix this, it would be a noticable performance overhead and therefore this option of items from multiple subscriptions is chosen as the 'lesser of the evils'! See `testKeepProducingRequestSizeItemsAfterCancel` in `ReactiveCollectionTests.swift` for an example.
 
 ## Roadmap
-  6. Add `SubscriptionTimeLimit` processor. Crossreference SubscriptionTimeLimit and ItemTimeout to explain difference. Use time limit to find default request size.
   7. Add `Fork` and `Join` `Processors` to enable:
   
           randomCoordinate ~~> fork ~~> [

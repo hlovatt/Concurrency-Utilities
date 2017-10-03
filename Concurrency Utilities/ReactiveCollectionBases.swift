@@ -37,15 +37,15 @@ public protocol PublisherBase: Publisher {
 }
 
 public extension PublisherBase {
-    /// Default imlementation does nothing.
-    func _resetOutputSubscription() {} // Can't be bothered to test.
-    
+    /// Default implementation does nothing.
+    func _resetOutputSubscription() {}
+
     /// Default imlementation accepts the subscription by returning an empty string, but does nothing else.
     var _isNewOutputSubscriberAccepted: String {
         return ""
     }
     
-    /// Default imlementation should not be overridden.
+    /// Default imlementation checks for multiple subscription attempt, checks if subscription aceepted, calls `_resetOutputSubscription`, and calls `newOutputSubscriber.on(subscribe: _outputSubscription)`.
     func subscribe<S>(_ newOutputSubscriber: S) where S: Subscriber, S.InputT == OutputT {
         var isSubscriptionError = false
         _outputSubscriber.update { outputSubscriberOptional in
@@ -109,9 +109,7 @@ public extension IteratorPublisherBase {
         return self
     }
 
-    /// Called to request `n` more items to be produced.
-    ///
-    /// - parameter n: The number of additional items requested.
+    /// Default implementation schedules requested items for production in the background on the given queue.
     func request(_ n: UInt64) {
         guard n != 0 else { // n == 0 is same as cancel.
             cancel()
@@ -168,8 +166,7 @@ public extension IteratorPublisherBase {
         }
     }
     
-    /// Cancel the subscription and cancel any outstanding item production on a best efforts basis, i.e. additional items may be produced before the cancellation takes effect.
-    /// Items are produced in upto `requestSize`d blocks and the current block will keep producing items after cancelleation, but a scheduled but unstarted block will be cancelled.
+    /// Defaulr implementation sets `_additionalRequestedItems.value` to zero and `nil`s out `_additionalRequestedItems`.
     func cancel() {
         _outputSubscriber.update { _ in
             _additionalRequestedItems.value = 0
@@ -180,7 +177,7 @@ public extension IteratorPublisherBase {
 
 /// A convenience class for implementing `IteratorPublisherBase`; it provides all the stored properties.
 ///
-/// - warning: `_next` must be overridden because the default implementation throws a fatal error.
+/// - warning: `_next` must be overridden because its default implementation throws a fatal error.
 ///
 /// - parameters
 ///   - O: The type of the output items produced.
@@ -203,10 +200,10 @@ open class IteratorPublisherClassBase<O>: IteratorPublisherBase {
     
     /// Default implementation throws a fatal error and *must* be overridden.
     open func _next() throws -> O? {
-        fatalError("Must override method `next`") // Can't test fatal errors.
+        fatalError("Must override method `_next`") // Can't test fatal errors.
     }
     
-    /// Default implementation does nothing and therefore *might* require overridding.
+    /// Default implementation does nothing.
     open func _resetOutputSubscription() {}
 }
 
@@ -361,8 +358,10 @@ public protocol RequestorSubscriberBase: SubscriberBase {
     /// Called when a new input subscription is requested.
     func _handleNewInputSubscription()
     
+    /// The number of items to request at a time.
     var _inputRequestSize: UInt64 { get }
     
+    /// The number of outstanding items in the current request (there is also an additional request of `requestSize` with producer, therefore producer is producing `_inputCountToRequest + requestSize` items).
     var _inputCountToRequest: UInt64 { get set }
 }
 
@@ -401,8 +400,8 @@ enum FutureSubscriberErrors: Error {
 /// It takes items from its subscription and passes them to its `next` method which processes each item and when completed the result is obtained from property `result` and returned via `get` and/or `status`.
 ///
 /// - warning:
-///   - Both `next` and `result` must be overriden (the default implementations throw a fatal error).
-///   The default `reset` method does nothing and therefore *might* also need overriding.
+///   - Both `_consume` and `_result` must be overriden (the default implementations throw a fatal error).
+///   The default `_resetAccumulation` method does nothing and therefore *might* also need overriding.
 ///   - `Subscriber`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
 ///   - There are *no* `Publisher` methods/properties intended for use by a client (the programmer using an instance of this class), the client *only* passes the instance to the `subscribe` method of a `Publisher`.
 ///     The `Future` properties `get` and `status` and method `cancel` are the methods with which the client interacts.
@@ -418,13 +417,10 @@ enum FutureSubscriberErrors: Error {
 ///   - T: The type of the elements subscribed to.
 ///   - R: The result type of the accumulation.
 open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
-    /// The number of items to request at a time.
     public let _inputRequestSize: UInt64
     
-    /// The number of outstanding items in the current request (there is also an additional request of `requestSize` with producer, therefore producer is producing `_inputCountToRequest + requestSize` items).
     public var _inputCountToRequest: UInt64 = 0
     
-    /// The subscription, if there is one.
     public let _inputSubscription = Atomic<Subscription?>(nil)
     
     // MARK: init
@@ -455,18 +451,10 @@ open class FutureSubscriberClassBase<T, R>: Future<R>, RequestorSubscriberBase {
         self._inputRequestSize = requestSize
     }
     
-    // MARK: Methods that must be overridden
-    
-    /// Consume the next item from the input subscription.
-    /// Default implementation throws a fatal error, *must* be overridden.
-    ///
-    /// - parameter item: The next item from the input susbcription.
     open func _consume(item: T) throws {
         fatalError("Method must be overridden") // Can't test a fatal error.
     }
     
-    /// Return the result so far (called when the accumulation is complete and its value stored in status and returned by `get`).
-    /// Default implementation throws a fatal error, *must* be overridden.
     open var _result: R {
         fatalError("Getter must be overridden.") // Can't test a fatal error.
     }
@@ -658,35 +646,27 @@ public extension ProcessorBase {
 
 /// A convenience class for implementing `ProcessorBase`; it provides all the stored properties.
 ///
-/// - warning: `_consumeAndRequest(item:)` must be overridden because the default implementation throws a fatal error.
+/// - warning: `_consumeAndRequest(item:)` and `_resetOutputSubscription` must both be overridden because their default implementations throw a fatal error.
 ///
 /// - parameters
 ///   - I: The type of the input items to be processed.
 ///   - O: The type of the output items produced.
 open class ProcessorClassBase<I, O>: ProcessorBase {
-    /// The input item's type.
     public typealias InputT = I
     
-    /// The output item's type.
     public typealias OutputT = O
     
-    /// The subscriber to the output, if there is one.
     public let _outputSubscriber = Atomic<AnySubscriber<O>?>(nil)
     
-    /// The input subscription, if there is one.
     public let _inputSubscription = Atomic<Subscription?>(nil)
     
-    /// Takes the next item from the subscription and if necessary requests more items from the subscription.
-    ///
-    /// - warning: Must be overridden, default throws a fatal error.
-    ///
-    /// - parameter item: The next item.
     open func _consumeAndRequest(item: I) throws {
         fatalError("Must be overridden.") // Can't test a fatal error!
     }
     
-    /// Resets the output subscription when a new output subscription starts, default implementation does nothing.
-    open func _resetOutputSubscription() {}
+    open func _resetOutputSubscription() {
+        fatalError("Must override method `_resetOutputSubscription`") // Can't test fatal errors.
+    }
 }
 
 /// Base protocol for processors that take items from its input subscription and passes every item to each of its output subscriptions.

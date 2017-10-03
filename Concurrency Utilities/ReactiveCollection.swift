@@ -307,7 +307,12 @@ public enum TimeoutError: Error {
     case timedOut
 }
 
-/// A `Processor` that generates an error if there is a more than the given time interval between input items.
+/// A `Processor` that generates an error if there is a more than the given time interval between consecutive input items.
+/// This processor is a type of timer, like `SubscriptionTimeLimitProcessor` is.
+/// The difference between the two is twofold:
+///
+///  1. This processor times between input items as opposed to the time subscribed to a publisher.
+///  2. This processor signals an error if the timeout time is exceeded as opposed to completing.
 ///
 /// - warning:
 ///   - `processors`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
@@ -318,18 +323,17 @@ public enum TimeoutError: Error {
 ///   - T: The type of the input and output items.
 public final class ItemTimeoutProcessor<T>: ProcessorClassBase<T, T> {
     private let queue: DispatchQueue
-
+    
     private let timeout: DispatchTimeInterval
     
-    private var timer = Atomic<DispatchWorkItem?>(nil) // Potentially written from three diffdrent queues: `queue`, `_consumeAndRequest(item: T)`'s queue, and `_resetOutputSubscription()`'s queue and the last two queues also read.
+    private var timer = Atomic<DispatchWorkItem?>(nil) // Potentially written from three different queues: `queue`, `_consumeAndRequest(item: T)`'s queue, and `_resetOutputSubscription()`'s queue and the last two queues also read.
     
-    /// A `Processor` that generates an error if there is a more than the given time interval between input items.
+    /// A `Processor` that generates an error if there is a more than the given time interval between consecutive input items.
     ///
-    /// - parameters
-    ///   - The queue on which the timer runs (default `DispatchQueue(label: "Timer Serial Queue \(UniqueNumber.next)")`).
+    /// - parameters:
+    ///   - queue: The queue on which the timer runs (default `DispatchQueue(label: "ItemTimeoutProcessor Serial Queue \(UniqueNumber.next)")`).
     ///   - timeout: The maximum allowable time between input items, otherwise `outputSubscriber.on(error: TimeoutError.timedOut)` (default `Futures.defaultTimeout`).
-    ///   - leeway: The error the timer is allowed in measuring the time (default `Futures.defaultTimerLeeway`)
-    public init(queue: DispatchQueue = DispatchQueue(label: "Timer Serial Queue \(UniqueNumber.next)"), timeout: DispatchTimeInterval = Futures.defaultTimeout) {
+    public init(queue: DispatchQueue = DispatchQueue(label: "ItemTimeoutProcessor Serial Queue \(UniqueNumber.next)"), timeout: DispatchTimeInterval = Futures.defaultTimeout) {
         self.queue = queue
         self.timeout = timeout
     }
@@ -337,7 +341,7 @@ public final class ItemTimeoutProcessor<T>: ProcessorClassBase<T, T> {
     public override func _consumeAndRequest(item: T) throws {
         timer.update { timerOptional in
             timerOptional?.cancel()
-            let t = DispatchWorkItem { // The real timer.
+            let t = DispatchWorkItem {
                 self._outputSubscriber.update { outputSubscriberOptional in
                     outputSubscriberOptional?.on(error: TimeoutError.timedOut)
                     return nil
@@ -361,3 +365,59 @@ public final class ItemTimeoutProcessor<T>: ProcessorClassBase<T, T> {
         }
     }
 }
+
+/// A `Processor` that completes once it has had an output subscription for the given time limit.
+/// This processor is a type of timer, like `ItemTimeoutProcessor` is.
+/// The difference between the two is twofold:
+///
+///  1. This processor times between from start of output subscription as opposed to the time between input items.
+///  2. This processor completes if the time limit is exceeded as opposed to signalling an error.
+///
+/// - warning:
+///   - `processors`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///   - There are *no* `Publisher` methods/properties intended for use by a client (the programmer using an instance of this class), the client *only* passes the instance to the `subscribe` method of a `Publisher`.
+///   Passing the instance to the publisher is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
+///
+/// - parameters
+///   - T: The type of the input and output items.
+public final class SubscriptionTimeLimitProcessor<T>: ProcessorClassBase<T, T> {
+    private let queue: DispatchQueue
+    
+    private let timeLimit: DispatchTimeInterval
+    
+    private var timer = Atomic<DispatchWorkItem?>(nil) // Potentially written from two different queues: `queue` and `_resetOutputSubscription()`'s queue and the last queue also reads.
+    
+    /// A `Processor` that completes once it has had an output subscription for the given time limit.
+    ///
+    /// - parameters:
+    ///   - queue: The queue on which the timer runs (default `DispatchQueue(label: "SubscriptionTimeLimitProcessor Serial Queue \(UniqueNumber.next)")`).
+    ///   - timeLimit: The time from the start of the output subscription to completion (default `Futures.defaultTimeout`).
+    public init(queue: DispatchQueue = DispatchQueue(label: "SubscriptionTimeLimitProcessor Serial Queue \(UniqueNumber.next)"), timeLimit: DispatchTimeInterval = Futures.defaultTimeout) {
+        self.queue = queue
+        self.timeLimit = timeLimit
+    }
+    
+    public override func _consumeAndRequest(item: T) throws {
+        _outputSubscriber.value?.on(next: item)
+    }
+    
+    public override func _resetOutputSubscription() {
+        timer.update { timerOptional in
+            timerOptional?.cancel()
+            let t = DispatchWorkItem {
+                self._outputSubscriber.update { outputSubscriberOptional in
+                    outputSubscriberOptional?.onComplete()
+                    return nil
+                }
+                self._inputSubscription.update { inputSubscriptionOptional in
+                    inputSubscriptionOptional?.cancel()
+                    return nil
+                }
+                self.timer.value = nil
+            }
+            queue.asyncAfter(deadline: DispatchTime.now() + timeLimit, execute: t)
+            return t
+        }
+    }
+}
+
