@@ -8,8 +8,6 @@
 
 import Foundation
 
-// MARK: Utilities
-
 // MARK: `Publisher`s.
 
 /// Produces items by setting a seed to the given `initialSeed` and then calling the given `nextItem` closure repeatedly (giving the seed as its argument).
@@ -40,22 +38,22 @@ public final class IteratorSeededPublisher<S, O>: IteratorPublisherClassBase<O> 
     /// Produces items by setting a seed to the given `initialSeed` and then calling the given `nextItem` closure repeatedly (giving the seed as its argument).
     ///
     /// - parameters:
-    ///   - dispatchQueue: Dispatch queue used to produce items in the background (default `DispatchQueue.global()`).
+    ///   - queue: Dispatch queue used to produce items in the background (default `DispatchQueue.global()`).
     ///   - initialSeed: The value of the seed at the start of each iteration cycle.
     ///   - nextItem: A closure that produces the next item, or `nil` to indicate termination, given the seed (which it can modify)
     ///   - seed: The seed passed to the `nextItem` closure as an `inout` parameter so that the closure can modify the seed.
-    public init(dispatchQueue: DispatchQueue = DispatchQueue.global(), initialSeed: S, nextItem: @escaping (_ seed: inout S) throws -> O?) {
+    public init(queue: DispatchQueue = .global(), initialSeed: S, nextItem: @escaping (_ seed: inout S) throws -> O?) {
         self.initialSeed = initialSeed
         seed = initialSeed
         self.nextItem = nextItem
-        super.init(dispatchQueue: dispatchQueue)
+        super.init(queue: queue)
     }
     
-    public override func _next() throws  -> O? {
+    override func _next() throws  -> O? {
         return try nextItem(&seed)
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         seed = initialSeed
     }
 }
@@ -85,17 +83,17 @@ public final class ForEachPublisher<O>: IteratorPublisherClassBase<O> {
     ///
     /// - parameters:
     ///   - sequence: The sequence of items produced (one sequence per subscription assuming that the sequence can be traversed multiple times).
-    ///   - dispatchQueue: Dispatch queue used to produce items in the background (default `DispatchQueue.global()`).
-    public init<S>(sequence: S, dispatchQueue: DispatchQueue = DispatchQueue.global()) where S: Sequence, S.SubSequence: Sequence, S.Iterator.Element == O, S.SubSequence.SubSequence == S.SubSequence, S.SubSequence.Iterator.Element == O {
+    ///   - queue: Dispatch queue used to produce items in the background (default `DispatchQueue.global()`).
+    public init<S>(sequence: S, queue: DispatchQueue = .global()) where S: Sequence, S.SubSequence: Sequence, S.Iterator.Element == O, S.SubSequence.SubSequence == S.SubSequence, S.SubSequence.Iterator.Element == O {
         self.sequence = AnySequence(sequence)
-        super.init(dispatchQueue: dispatchQueue)
+        super.init(queue: queue)
     }
     
-    public override func _next() -> O? {
+    override func _next() -> O? {
         return iterator.next()
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         iterator = sequence.makeIterator()
     }
 }
@@ -156,15 +154,15 @@ public final class ReduceFutureSubscriber<T, R>: FutureSubscriberClassBase<T, R>
         super.init(timeout: timeout, requestSize: requestSize)
     }
     
-    public override func _consume(item: T) throws {
+    override func _handleInput(item: T) throws {
         try updateAccumulatingResult(&result, item)
     }
     
-    public override var _result: R {
+    override var _result: R {
         return result
     }
     
-    public override func _resetAccumulation() {
+    override func _resetAccumulation() {
         result = initialResult
     }
 }
@@ -201,16 +199,16 @@ public final class MapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
         transformClosure = transform
     }
     
-    public override func _consumeAndRequest(item: I) throws {
+    override func _handleInputAndRequest(item: I) throws {
         _outputSubscriber.value?.on(next: try transformClosure(&seed, item))
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         seed = initialSeed
     }
 }
 
-/// A `Processor` that takes input items from its input subscription and maps (a.k.a. processes, a.k.a. transforms) them into *non-`nil`* output items (Reactive Collection version of `Sequence.flatMap(_ transform:)`).
+/// A `Processor` that takes input items from its input subscription and maps (a.k.a. processes, a.k.a. transforms) them into output items and if the output items are `nil` they are filtered from the output; the output is flattened if you consider an `Optional` to be a container of up to one item (Reactive Collection version of `Sequence.flatMap<O>(_ transform: (I) throws -> O?)`).
 ///
 /// - warning:
 ///   - `processors`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
@@ -221,7 +219,7 @@ public final class MapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
 ///   - S: The type of the seed accepted by the given transform closure.
 ///   - I: The type of the input items subscribed to.
 ///   - O: The output type after the mapping.
-public final class FlatMapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
+public final class FlatMapOptionalSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
     private let initialSeed: S
     
     private let transformClosure: (inout S, I) throws -> O?
@@ -243,7 +241,7 @@ public final class FlatMapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
         transformClosure = transform
     }
     
-    public override func _consumeAndRequest(item: I) throws {
+    override func _handleInputAndRequest(item: I) throws {
         let outputItemOptional = try transformClosure(&seed, item)
         guard let outputItem = outputItemOptional else {
             _inputSubscription.value?.request(1)
@@ -252,7 +250,7 @@ public final class FlatMapSeededProcessor<S, I, O>: ProcessorClassBase<I, O> {
         _outputSubscriber.value?.on(next: outputItem)
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         seed = initialSeed
     }
 }
@@ -287,7 +285,7 @@ public final class FilterSeededProcessor<S, T>: ProcessorClassBase<T, T> {
         isIncludedClosure = isIncluded
     }
     
-    public override func _consumeAndRequest(item: T) throws {
+    override func _handleInputAndRequest(item: T) throws {
         if try isIncludedClosure(&seed, item) {
             _outputSubscriber.value?.on(next: item)
         } else {
@@ -295,7 +293,7 @@ public final class FilterSeededProcessor<S, T>: ProcessorClassBase<T, T> {
         }
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         seed = initialSeed
     }
 }
@@ -322,23 +320,21 @@ public enum TimeoutError: Error {
 /// - parameters
 ///   - T: The type of the input and output items.
 public final class ItemTimeoutProcessor<T>: ProcessorClassBase<T, T> {
-    private let queue: DispatchQueue
+    private let queue = DispatchQueue(label: "ItemTimeoutProcessor Serial Queue \(UniqueNumber.next)")
     
     private let timeout: DispatchTimeInterval
     
-    private var timer = Atomic<DispatchWorkItem?>(nil) // Potentially written from three different queues: `queue`, `_consumeAndRequest(item: T)`'s queue, and `_resetOutputSubscription()`'s queue and the last two queues also read.
+    private var timer = Atomic<DispatchWorkItem?>(nil) // Potentially written from three different queues: `queue`, `_handleInputAndRequest(item: T)`'s queue, and `_resetOutputSubscription()`'s queue and the last two queues also read.
     
     /// A `Processor` that generates an error if there is a more than the given time interval between consecutive input items.
     ///
     /// - parameters:
-    ///   - queue: The queue on which the timer runs (default `DispatchQueue(label: "ItemTimeoutProcessor Serial Queue \(UniqueNumber.next)")`).
     ///   - timeout: The maximum allowable time between input items, otherwise `outputSubscriber.on(error: TimeoutError.timedOut)` (default `Futures.defaultTimeout`).
-    public init(queue: DispatchQueue = DispatchQueue(label: "ItemTimeoutProcessor Serial Queue \(UniqueNumber.next)"), timeout: DispatchTimeInterval = Futures.defaultTimeout) {
-        self.queue = queue
+    public init(timeout: DispatchTimeInterval = Futures.defaultTimeout) {
         self.timeout = timeout
     }
     
-    public override func _consumeAndRequest(item: T) throws {
+    override func _handleInputAndRequest(item: T) throws {
         timer.update { timerOptional in
             timerOptional?.cancel()
             let t = DispatchWorkItem {
@@ -358,7 +354,7 @@ public final class ItemTimeoutProcessor<T>: ProcessorClassBase<T, T> {
         _outputSubscriber.value?.on(next: item)
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         timer.update { timerOptional in
             timerOptional?.cancel()
             return nil
@@ -381,7 +377,7 @@ public final class ItemTimeoutProcessor<T>: ProcessorClassBase<T, T> {
 /// - parameters
 ///   - T: The type of the input and output items.
 public final class SubscriptionTimeLimitProcessor<T>: ProcessorClassBase<T, T> {
-    private let queue: DispatchQueue
+    private let queue = DispatchQueue(label: "SubscriptionTimeLimitProcessor Serial Queue \(UniqueNumber.next)")
     
     private let timeLimit: DispatchTimeInterval
     
@@ -390,18 +386,16 @@ public final class SubscriptionTimeLimitProcessor<T>: ProcessorClassBase<T, T> {
     /// A `Processor` that completes once it has had an output subscription for the given time limit.
     ///
     /// - parameters:
-    ///   - queue: The queue on which the timer runs (default `DispatchQueue(label: "SubscriptionTimeLimitProcessor Serial Queue \(UniqueNumber.next)")`).
-    ///   - timeLimit: The time from the start of the output subscription to completion (default `Futures.defaultTimeout`).
-    public init(queue: DispatchQueue = DispatchQueue(label: "SubscriptionTimeLimitProcessor Serial Queue \(UniqueNumber.next)"), timeLimit: DispatchTimeInterval = Futures.defaultTimeout) {
-        self.queue = queue
+    ///   - timeLimit: The maximum allowable time from output subscription to termination (default `Futures.defaultTimeout`).
+    public init(timeLimit: DispatchTimeInterval = Futures.defaultTimeout) {
         self.timeLimit = timeLimit
     }
     
-    public override func _consumeAndRequest(item: T) throws {
+    override func _handleInputAndRequest(item: T) throws {
         _outputSubscriber.value?.on(next: item)
     }
     
-    public override func _resetOutputSubscription() {
+    override func _resetOutputSubscription() {
         timer.update { timerOptional in
             timerOptional?.cancel()
             let t = DispatchWorkItem {
@@ -421,3 +415,26 @@ public final class SubscriptionTimeLimitProcessor<T>: ProcessorClassBase<T, T> {
     }
 }
 
+/// Processors that forks (a.k.a. fans-out/duplicates) its input flow stream by passing all input item onto all its output forks (a.k.a. output flows/streams/subscriptions).
+/// The input items are bufferd into the input buffer and each output stream has its own task supplying items from the ouput buffer, that way output streams operate concurrently (in parallel on multi-core machines) and thereby account for different processing and consumption rates of the different forks.
+/// When the output buffer is output to all forks and the input buffer is full the two buffers are swapped over.
+/// When the input subscription and output subscriptions are established the `fork` method is called to start production, no change in either input or output is then allowed until production has finished.
+/// Once any the output forks cancel the input subscription is cancelled and the other output subscriptions are notified by an error of the cancellation.
+/// An `on(error: Item)` or `onComplete()` from the input is passed to all output subscribers.
+///
+/// - warning:
+///   - The *only* method/property intended for use by a client (the programmer using an instance of this class) is method `subscribe`; however an instance of this class may be passed to the `subscribe` method of another `Publisher`.
+///   Passing the instance to the publisher and subscribing to its output is best accomplished using operator `~~>`, since this emphasizes that the other methods are not for client use.
+///   - `Processor`s are not thread safe, since they are an alternative to dealing with thread safety directly and therefore it makes no sense to share them between threads.
+///
+/// - parameters
+///   - T: The type of the input and output items.
+public final class AllItemsForker<T>: ForkerClassBase<T> {
+    /// Processor that forks (a.k.a. fans-out/duplicates) its input flow stream by passing all input item onto all its output forks (a.k.a. output flows/streams/subscriptions).
+    ///
+    /// - parameters:
+    ///   - queue: Dispatch queue used to feed input items to output forks in the background (default `DispatchQueue.global()`).
+    public override init(queue: DispatchQueue = .global()) {
+        super.init(queue: queue)
+    }
+}

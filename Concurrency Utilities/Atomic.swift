@@ -17,11 +17,11 @@ import Foundation
 public enum UniqueNumber {
     private static var queue = DispatchQueue(label: "UniqueNumber Serial Queue", qos: DispatchQoS.userInitiated)
     
-    private static var uniqueNumber = Int.min
+    private static var uniqueNumber: UInt = 0
     
     /// The next unique number.
-    public static var next: Int {
-        var result = 0
+    public static var next: UInt {
+        var result: UInt = 0
         queue.sync {
             uniqueNumber += 1
             result = uniqueNumber
@@ -30,7 +30,7 @@ public enum UniqueNumber {
     }
 }
 
-/// Gives atomic get/set/update to its value.
+/// Gives atomic get/set/update/mutate to its value.
 ///
 /// - parameters
 ///   - T: The type of the value.
@@ -53,11 +53,11 @@ public final class Atomic<T> {
     /// - note: See `update` for getting and then setting the value atomically.
     public var value: T {
         get {
-            var value: T?
+            var result: T? = nil
             queue.sync {
-                value = self._value
+                result = self._value
             }
-            return value!
+            return result!
         }
         set {
             queue.sync {
@@ -66,7 +66,8 @@ public final class Atomic<T> {
         }
     }
     
-    /// Atomically update the value (get then set value in one operation guaranteeing no `get`s, `set`s, or `update`s from other threads in between).
+    /// Atomically update (recieve current value and supply new value) the value (get then set value in one operation guaranteeing no `get`s, `set`s, `update`s, or `mutate`s from other threads inbetween).
+    /// Also see `mutate` which is potentially faster, particularly for arrays and alike, but you can make the mistake of forgetting to actually update the value when using `mutate` and it doesn't return the new value.
     ///
     /// - parameters:
     ///   - updater: A closure that accepts the current value and returns the new value.
@@ -80,5 +81,17 @@ public final class Atomic<T> {
             self._value = result!
         }
         return result!
+    }
+    
+    /// Atomically mutate (in place) the value (get then set value in one operation guaranteeing no `get`s, `set`s, `update`s, or `mutate`s from other threads inbetween).
+    /// Also see `update` which is easier to use because you can't forget to actually do the update and it returns the new value; but is potentially slower, particularly for arrays and alike.
+    ///
+    /// - parameters:
+    ///   - mutater: A closure that accepts the value as an inout parameter.
+    ///   - value: The value to be mutated (inout parameter).
+    public func mutate(mutater: (_ value: inout T) -> Void) {
+        queue.sync {
+            mutater(&self._value)
+        }
     }
 }

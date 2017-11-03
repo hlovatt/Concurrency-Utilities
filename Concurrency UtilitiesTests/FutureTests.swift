@@ -35,43 +35,10 @@ class FutureTests: XCTestCase {
     func testHelloWorld() {
         let test = "Hello, world!"
         let future = AsynchronousFuture { _ -> String in
-            self.sleepUpTo100ms().get // Long task!
+            self.sleepUpTo100ms().wait // Long task!
             return test
         }
-        let result = future.get ?? "Failure!"
-        XCTAssertEqual(test, result)
-    }
-    
-    func testHelloWorldTildeTildeGreaterThan() {
-        let test = "Hello, world!"
-        let future = AsynchronousFuture { _ -> String in
-            self.sleepUpTo100ms().get // Long task!
-            return test
-        }
-        var result: String? = "Failure!"
-        future ~~> result
-        XCTAssertEqual(test, result)
-    }
-    
-    func testHelloWorldTildeTildeGreaterThanQuestion() {
-        let test = "Hello, world!"
-        let future = AsynchronousFuture { _ -> String in
-            self.sleepUpTo100ms().get // Long task!
-            return test
-        }
-        var result: String = "Failure!"
-        future ~~>? result
-        XCTAssertEqual(test, result)
-    }
-    
-    func testHelloWorldTildeTildeGreaterThanBang() {
-        let test = "Hello, world!"
-        let future = AsynchronousFuture { _ -> String in
-            self.sleepUpTo100ms().get // Long task!
-            return test
-        }
-        var result: String = "Failure!"
-        future ~~>! result
+        let result = future.wait ?? "Failure!"
         XCTAssertEqual(test, result)
     }
     
@@ -90,8 +57,7 @@ class FutureTests: XCTestCase {
             }
         }
         let future = getFromWeb(url: "")
-        var result: String? = "Failure!"
-        future ~~> result
+        let result = future.wait ?? "Failure!"
         XCTAssertEqual(test, result)
     }
     
@@ -101,7 +67,7 @@ class FutureTests: XCTestCase {
             return test
         }
         Thread.sleep(forTimeInterval: 0.01) // Stuff that would take some time goes here.
-        let result = future.get ?? "Failed!" // Because timeout is zero `get` never waits.
+        let result = future.wait ?? "Failed!" // Because timeout is zero `get` never waits.
         XCTAssertEqual(test, result)
     }
     
@@ -112,14 +78,14 @@ class FutureTests: XCTestCase {
             return test
         }
         Thread.sleep(forTimeInterval: 0) // Doesn't take long.
-        let result = future.get ?? "Failed!" // Because timeout is zero `get` never waits.
+        let result = future.wait ?? "Failed!" // Because timeout is zero `get` never waits.
         XCTAssertEqual("Failed!", result)
     }
     
     func testAsynchronousFutureCancelThenGet() {
         let cancelled = sleepUpTo100ms()
         cancelled.cancel()
-        XCTAssertNil(cancelled.get)
+        XCTAssertNil(cancelled.wait)
     }
     
     // MARK: Future coverage tests
@@ -128,19 +94,19 @@ class FutureTests: XCTestCase {
         let completed = AsynchronousFuture { _ in
             true // completes straight away.
         }
-        XCTAssertTrue(completed.get!)
+        XCTAssertTrue(completed.wait!)
     }
     
     func testAsynchronousFutureThrew() {
         let threw = AsynchronousFuture { _ in
             throw TerminateFuture.cancelled // Throws straight away.
         }
-        XCTAssertNil(threw.get)
+        XCTAssertNil(threw.wait)
     }
     
     func testAsynchronousFutureTimeout() {
         let s100ms = sleepUpTo100ms()
-        s100ms.get // Wait for timeout
+        s100ms.wait // Wait for timeout
         Thread.sleep(forTimeInterval: 0.05) // Wait for status to update.
         switch s100ms.status {
         case .threw(let error):
@@ -185,7 +151,7 @@ class FutureTests: XCTestCase {
         cancelled.cancel()
         Thread.sleep(forTimeInterval: 0.05) // Allow time for status to update.
         cancelled.cancel() // Tests a 2nd path in cancel logic.
-        XCTAssertNil(cancelled.get)
+        XCTAssertNil(cancelled.wait)
     }
     
     func testAsynchronousFutureCancelDetectedAfterExecutionFinished() {
@@ -214,7 +180,7 @@ class FutureTests: XCTestCase {
         let completed = AsynchronousFuture { () -> (_: Void?, _: Error?) in
             ((), nil) // Completes straight away.
         }
-        completed.get // Wait for completion.
+        completed.wait // Wait for completion.
         Thread.sleep(forTimeInterval: 0.01) // Wait for status to update.
         switch completed.status {
         case .completed(_):
@@ -247,7 +213,7 @@ class FutureTests: XCTestCase {
     }
     
     func testFutureGet() {
-        XCTAssertNil(Future<Void>().get)
+        XCTAssertNil(Future<Void>().wait)
     }
     
     func testFutureCancelAndStatus() {
@@ -271,7 +237,7 @@ class FutureTests: XCTestCase {
     }
     
     func testThrownFutureGet() {
-        XCTAssertNil(FailedFuture<Void>(TerminateFuture.cancelled).get)
+        XCTAssertNil(FailedFuture<Void>(TerminateFuture.cancelled).wait)
     }
     
     func testThrownFutureCancelAndStatus() {
@@ -295,7 +261,7 @@ class FutureTests: XCTestCase {
     }
     
     func testKnownFutureGet() {
-        XCTAssertTrue(KnownFuture(true).get!)
+        XCTAssertTrue(KnownFuture(true).wait!)
     }
     
     func testKnownFutureCancelAndStatus() {

@@ -6,8 +6,6 @@
 //  Copyright © 2017 Howard Lovatt. Creative Commons Attribution 4.0 International License.
 //
 
-import Foundation
-
 /// Interrelated protocols for establishing flow-controlled components in which `Publishers` produce items consumed by one or more `Subscriber`s, each managed by a `Subscription`.
 /// These interfaces correspond to the reactive-streams specification.
 ///
@@ -17,18 +15,6 @@ import Foundation
 
 /// A `Processor` represents a processing stage — which is both a `Subscriber` and a `Publisher` and obeys the contracts of both.
 public protocol Processor: Subscriber, Publisher {}
-
-/// `Publisher` errors that the publisher reports using `Subscriber.on(error: Error)`.
-public enum PublisherErrors: Error {
-    /// Subscription request failed.
-    case subscriptionRejected(reason: String)
-    
-    /// Requested illegal number of items.
-    case cannotProduceRequestedNumberOfItems(numberRequested: UInt64, reason: String)
-    
-    /// Existing subscription is terminated.
-    case existingSubscriptionTerminated(reason: String)
-}
 
 /// A `Publisher` is a provider of a potentially unbounded number of sequenced items, publishing them according to the demand received from its `Subscriber`(s).
 ///
@@ -102,98 +88,12 @@ public protocol Subscriber: AnyObject {
     func on(subscribe: Subscription)
 }
 
-/// Operator for stream flow.
-///
-/// - note:
-//    - Double tilde used because `~>` already defined in the Swift standard library, but without associativity and therefore can't be chained.
-///   - The wavy line, `~~`, is reminiscent of both 'S' for subscription and the fact that flow goes up and down.
-///   - The `>` is the direction of the flow.
-infix operator ~~> : MultiplicationPrecedence
-
-/// Operator for stream flow that force unwraps an optional.
-infix operator ~~>! : MultiplicationPrecedence
-
-/// Operator for stream flow that ignores a `nil` optional.
-infix operator ~~>? : MultiplicationPrecedence
-
-/// Operator for bi-directional stream flow.
-infix operator <~~> : MultiplicationPrecedence
-
-// Add flow syntax as an extension to `Subscriber` rather than `Publisher`, since the subscriber is returned and therefore the full type information, Self, is available for subsequent stages.
-public extension Subscriber {
-    /// Subscribe a subscriber to a publisher using stream flow syntax, `publisher ~~> subscriber`.
-    ///
-    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.OutputT == InputT {
-        left.subscribe(right)
-        return right
-    }
-    
-    /// Subscribe a subscriber to multiple publishers using stream flow syntax, `[publisher1, publisher2, ...] ~~> subscriber`.
-    ///
-    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func ~~> <S, P>(lefts: S, right: Self) -> Self where S: Sequence, S.Iterator.Element == P, P: Publisher, P.OutputT == InputT {
-        for left in lefts {
-            left.subscribe(right)
-        }
-        return right
-    }
-}
-
-// Add bi-directional flow syntax as an extension to `Processor`, since the right hand side processor is returned and therefore the full type information, Self, is available for subsequent stages.
-public extension Processor {
-    /// Subscribe left processor to right processor then subscribe right processor to left processor using stream flow syntax, `leftProcessor <~~> rightProcessor`, thus enabling bi-directional flow between the two processors.
-    ///
-    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func <~~> <L>(left: L, right: Self) -> Self where L: Processor, L.OutputT == InputT, OutputT == L.InputT {
-        left.subscribe(right)
-        right.subscribe(left)
-        return right
-    }
-    
-    /// For each of the left processors subscribe them to the right processor then subscribe the right processor to the left processor using stream flow syntax, `[leftProcessor1, leftProcessor2, ...] <~~> rightProcessor`, thus enabling bi-directional flow between the left processors and the right processor.
-    ///
-    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func <~~> <S, L>(lefts: S, right: Self) -> Self where S: Sequence, S.Iterator.Element == L, L: Processor, L.OutputT == InputT, OutputT == L.InputT {
-        for left in lefts {
-            left.subscribe(right)
-            right.subscribe(left)
-        }
-        return right
-    }
-}
-
-// Add flow syntax as an extension to `Sequence` rather than `Publisher`, since the sequence is returned and therefore the full type information, Self, is available for subsequent stages.
-public extension Sequence {
-    /// Subscribe multiple subscribers to a single publisher using stream flow syntax, `publisher ~~> [subscriber1, subscriber2, ...]`.
-    ///
-    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func ~~> <P, S>(left: P, rights: Self) -> Self where Self.Iterator.Element == S,  S: Subscriber, P: Publisher, P.OutputT == S.InputT {
-        for right in rights {
-            left.subscribe(right)
-        }
-        return rights
-    }
-    
-    /// For each of the right processors subscribe the left processor to the right processor then subscribe the right processor to the left processor using stream flow syntax, `leftProcessor <~~> [rightProcessor1, rightProcessor2, ...]`, thus enabling bi-directional flow between the left processor and the right processors.
-    ///
-    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
-    @discardableResult public static func <~~> <L, R>(left: L, rights: Self) -> Self where L: Processor, Iterator.Element == R, R: Processor, L.OutputT == R.InputT, R.OutputT == L.InputT {
-        for right in rights {
-            left.subscribe(right)
-            right.subscribe(left)
-        }
-        return rights
-    }
-}
-
 /// Wrap any `Subscriber` in a standard class, useful where `Subscriber` is needed as a type (it is a protocol with associated type and therefore not a type itself but rather a generic constraint).
-///
-/// EG Implementations of `Subscription` typically contain a reference to the `Subscriber` they belong to and this reference is typed `AnySubscriber` because `Subscriber` cannot be used as a type because it has an associated type `InputT`.
+/// EG Implementations of `Subscription` typically contain a reference to the `Subscriber`.
 ///
 /// - note:
 ///   - In Swift terminology `AnySubscriber` is said to type erase `Subscriber`; meaning that it doesn't matter what type of subscriber is given to `AnySubscriber`'s `init` the result will always be the same type, `AnySubscriber`.
-///   - For a Java, Scala, Haskell, etc. programmer this terminology is confusing because type erasure in these languages refers to erasing the generic type, in this case `T`, not the main type, in this case `AnySubscriber`.
+///   - For a Java, Scala, Haskell, etc. programmer this terminology is confusing because type erasure in these languages refers to erasing the generic type, in this case `I`, not the main type, in this case `AnySubscriber`.
 ///   - Further confusion for the Java, Scala, Haskell, etc. programmer is that `Subscriber` would be a type and not a generic constraint anyway, therefore `AnySubscriber` would be unnecessary in these languages.
 ///
 /// - parameters
@@ -201,46 +101,46 @@ public extension Sequence {
 public final class AnySubscriber<I>: Subscriber {
     public typealias InputT = I
     
-    private let complete: () -> Void
+    private let onCompleteErased: () -> Void
     
-    private let error: (Error) -> Void
+    private let onErrorErased: (Error) -> Void
     
-    private let next: (I) -> Void
+    private let onNextErased: (I) -> Void
     
-    private let subscribe: (Subscription) -> Void
+    private let onSubscribeErased: (Subscription) -> Void
     
     /// Wrap the given subscriber, which can be any type of subscriber, so that the type becomes `AnySubscriber` regardless of the originating subscriber's specific type.
     ///
-    /// - parameter subscriber: The subscriber to wrap.
+    /// - parameter subscriber: The subscriber to wrap (type erase).
     public init<S>(_ subscriber: S) where S: Subscriber, S.InputT == I {
-        complete = {
+        onCompleteErased = {
             subscriber.onComplete()
         }
-        error = {
+        onErrorErased = {
             subscriber.on(error: $0)
         }
-        next = {
+        onNextErased = {
             subscriber.on(next: $0)
         }
-        subscribe = {
+        onSubscribeErased = {
             subscriber.on(subscribe: $0)
         }
     }
     
     public func onComplete() {
-        self.complete()
+        self.onCompleteErased()
     }
     
     public func on(error: Error) {
-        self.error(error)
+        self.onErrorErased(error)
     }
     
     public func on(next: I) {
-        self.next(next)
+        self.onNextErased(next)
     }
     
     public func on(subscribe: Subscription) {
-        self.subscribe(subscribe)
+        self.onSubscribeErased(subscribe)
     }
 }
 
@@ -277,6 +177,14 @@ public protocol Subscription: AnyObject {
     func request(_ n: UInt64)
 }
 
+/// Functions and properties that are useful in conjunction with Reactive Streams (inside an enum to give them their own namespace).
+public enum ReactiveStreams {
+    /// Suggested default request size for `Subscriber`s.
+    ///
+    /// - note: The current implementation is 128.
+    public static let defaultRequestSize: UInt64 = 128
+}
+
 /// A failed subscription Singleton, used as the agrument for `Subscriber.on(subscribe:)` when a subscription attempt fails.
 /// The Reactive Stream specification requires that a subscription is provided by `Subscriber.on(subscribe:)` before the error is signalled by `Subscriber.on(error:)`, hence this subscription is used as the `subscribe` argument.
 /// The `cancel` and request` methods of this subscription both do nothing.
@@ -295,10 +203,104 @@ public final class FailedSubscription: Subscription {
     public func request(_ _: UInt64) {}
 }
 
-/// Functions and properties that are useful in conjunction with Reactive Streams (inside an enum to give them their own namespace).
-public enum ReactiveStreams {
-    /// Suggested default request size for `Subscriber`s.
+/// `Publisher` errors that a publisher could report using `Subscriber.on(error: Error)` (they can also report any other error).
+public enum PublisherErrors: Error {
+    /// Subscription request failed.
+    case subscriptionRejected(reason: String)
+    
+    /// Requested illegal number of items.
+    case cannotProduceRequestedNumberOfItems(numberRequested: UInt64, reason: String)
+    
+    /// Existing subscription is terminated.
+    case existingSubscriptionTerminated(reason: String)
+}
+
+/// Precedence for stream-flow operators.
+precedencegroup StreamFlowPrecedence {
+    associativity: left
+    lowerThan: AssignmentPrecedence
+}
+
+/// Operator for stream flow.
+///
+/// - note:
+///   - Double tilde used because `~>` already defined in the Swift standard library, but without associativity and therefore can't be chained.
+///   - The wavy line, `~~`, is reminiscent of both 'S' for subscription and the fact that flow goes up and down.
+///   - The `>` is the direction of the flow.
+infix operator ~~> : StreamFlowPrecedence
+
+/// Operator for bi-directional, stream flow.
+infix operator <~~> : StreamFlowPrecedence
+
+public extension Processor {
+    /// Subscribe left processor to right processor then subscribe right processor to left processor using bi-directional, stream-flow syntax, `leftProcessor <~~> rightProcessor`, thus enabling bi-directional flow between the two processors.
+    /// This operator is equivalent to `left.subscribe(right); right.subscribe(left); return right` but is prefered since the only method that a user of a reactive stream library should use is `subscribe`, the other methods are for use by the framework, and therefore using an operator habitually is less error prone.
     ///
-    /// - note: The current implementation is 128.
-    public static let defaultRequestSize: UInt64 = 128
+    /// - note: The subscription order is `left ~~> right` and then `right ~~> left`; which for many bidirectional connections is important since `left` is often the instigator of passing items and therefore should be subscribed to first.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    @discardableResult public static func <~~> <L>(left: L, right: Self) -> Self where L: Processor, L.OutputT == InputT, OutputT == L.InputT {
+        left ~~> right
+        right ~~> left
+        return right
+    }
+    
+    /// Subscribe multiple processors to a processor using bi-directional, stream-flow syntax, `[processor1, processor2, ...] <~~> processor`.
+    /// For each left this operator is equivalent to `left <~~> right` and then returning `right`.
+    ///
+    /// - note: The subscription order is `left ~~> right` and then `right ~~> left`; which for many bi-directional connections is important since `left` is often the instigator of passing items and therefore should be subscribed to first.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    @discardableResult public static func <~~> <Seq, Pro>(lefts: Seq, right: Self) -> Self where Seq: Sequence,  Seq.Iterator.Element == Pro, Pro: Processor, Pro.OutputT == InputT, Pro.InputT == OutputT {
+        for left in lefts {
+            left <~~> right
+        }
+        return right
+    }
+    
+    /// Subscribe a processor to multiple processors using bi-directional, stream-flow syntax, `processor <~~> [processor1, processor2, ...]`.
+    /// For each right this operator is equivalent to `left <~~> right`.
+    ///
+    /// - note: The subscription order is `left ~~> right` and then `right ~~> left`; which for many bi-directional connections is important since `left` is often the instigator of passing items and therefore should be subscribed to first.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    public static func <~~> <Seq, Pro>(left: Self, rights: Seq) where Seq: Sequence,  Seq.Iterator.Element == Pro, Pro: Processor, Pro.OutputT == InputT, Pro.InputT == OutputT {
+        for right in rights {
+            left <~~> right
+        }
+    }
+}
+
+public extension Publisher {
+    /// Subscribe multiple subscribers to a publisher using stream-flow syntax, `publisher ~~> [subscriber1, subscriber2, ...]`.
+    /// For each right this operator is equivalent to `left ~~> right`.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    public static func ~~> <Seq, Sub>(left: Self, rights: Seq) where Seq: Sequence,  Seq.Iterator.Element == Sub, Sub: Subscriber, Sub.InputT == OutputT {
+        for right in rights {
+            left ~~> right
+        }
+    }
+}
+
+public extension Subscriber {
+    /// Subscribe a subscriber to a publisher using stream-flow syntax, `publisher ~~> subscriber`.
+    /// This operator is equivalent to `left.subscribe(right); return right` but is prefered since the only method that a user of a reactive stream library should use is `subscribe`, the other methods are for use by the framework, and therefore using an operator habitually is less error prone.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    @discardableResult public static func ~~> <P>(left: P, right: Self) -> Self where P: Publisher, P.OutputT == InputT {
+        left.subscribe(right)
+        return right
+    }
+    
+    /// Subscribe a subscriber to multiple publishers using stream-flow syntax, `[publisher1, publisher2, ...] ~~> subscriber`.
+    /// For each left this operator is equivalent to `left ~~> right` and then returning `right`.
+    ///
+    /// - warning: This operator should not be overridden since it only has one meaningful definition, however this cannot be prevented in Swift 4 because the operator is defined on a protocol.
+    @discardableResult public static func ~~> <Seq, Pub>(lefts: Seq, right: Self) -> Self where Seq: Sequence,  Seq.Iterator.Element == Pub, Pub: Publisher, Pub.OutputT == InputT {
+        for left in lefts {
+            left ~~> right
+        }
+        return right
+    }
 }

@@ -10,7 +10,7 @@ import XCTest
 @testable import Concurrency_Utilities
 
 class AtomicTests: XCTestCase {
-    func testAtomicGetSetUpdate() {
+    func testAtomicGetSetUpdateMutate() {
         let test = Atomic((0, 0)) // Test that two parts of tuple always have same value.
         let error = Atomic(false)
         let group = DispatchGroup()
@@ -34,6 +34,15 @@ class AtomicTests: XCTestCase {
                     guard !$0 else { return true } // Don't over-write an existing error.
                     let t = test.value
                     return t.0 != t.1 // Test two parts of tuple have same value.
+                }
+            }
+            group.enter()
+            DispatchQueue.global().async {
+                error.mutate {
+                    defer { group.leave() }
+                    guard !$0 else { return } // Don't over-write an existing error.
+                    let t = test.value
+                    $0 = t.0 != t.1 // Test two parts of tuple have same value.
                 }
             }
         }
@@ -70,10 +79,9 @@ class AtomicTests: XCTestCase {
             group.enter()
             DispatchQueue.global().async {
                 defer { group.leave() }
-                lock.update {
+                lock.mutate { _ in
                     shared = i
                     XCTAssertEqual(i, shared)
-                    return ()
                 }
             }
         }
@@ -82,7 +90,7 @@ class AtomicTests: XCTestCase {
     
     func testUniqueNumber() {
         let group = DispatchGroup()
-        var ns = Array(repeating: 0, count: 100)
+        var ns = Array<UInt>(repeating: 0, count: 100)
         for i in 0 ..< ns.count {
             group.enter()
             DispatchQueue.global().async {

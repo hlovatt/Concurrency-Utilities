@@ -16,12 +16,14 @@ class ReactiveCollectionTests: XCTestCase {
     
     func testHelloWorld() {
         let test = "Hello, world!"
-        let helloWorldPublisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let helloWorldPublisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let helloWorldSubscriber = ReduceFutureSubscriber(into: "") { (result: inout String, nextChar: Character) in
             result.append(nextChar) // Copy the string a character at a time.
         }
-        var helloWorldResult = "Failed!"
-        helloWorldPublisher ~~> helloWorldSubscriber ~~>? helloWorldResult
+        
+        helloWorldPublisher ~~> helloWorldSubscriber
+        
+        let helloWorldResult = helloWorldSubscriber.wait ?? "Failed!"
         XCTAssertEqual(test, helloWorldResult)
     }
     
@@ -46,8 +48,10 @@ class ReactiveCollectionTests: XCTestCase {
         let lastValueSubscriber = ReduceFutureSubscriber(into: 0.0) { (old: inout Double, new: Double) in
             old = new
         }
-        var estimatedPi = Double.nan
-        randomCoordinatePublisher ~~> piEstimatorProcesssor ~~> lastValueSubscriber ~~>? estimatedPi
+
+        randomCoordinatePublisher ~~> piEstimatorProcesssor ~~> lastValueSubscriber
+        
+        let estimatedPi = lastValueSubscriber.wait ?? Double.nan
         XCTAssertEqual(Double.pi, estimatedPi, accuracy: 0.1)
     }
     
@@ -56,14 +60,16 @@ class ReactiveCollectionTests: XCTestCase {
             seed += 1
             return seed < 5 ? seed : nil
         }
-        let processor = FlatMapSeededProcessor(initialSeed: ()) { (_: inout Void, next: Int) in
+        let processor = FlatMapOptionalSeededProcessor(initialSeed: ()) { (_: inout Void, next: Int) in
             next % 2 == 0 ? next : nil
         }
         let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(8, result)
     }
     
@@ -80,8 +86,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(11, result)
     }
     
@@ -94,8 +102,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(10, result)
     }
     
@@ -109,8 +119,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(-1, result)
         switch subscriber.status {
         case .threw(let error):
@@ -132,8 +144,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(10, result)
     }
     
@@ -147,8 +161,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 4) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(4, result)
         switch subscriber.status {
         case .completed(_):
@@ -158,10 +174,230 @@ class ReactiveCollectionTests: XCTestCase {
         }
     }
     
+    func testAllItemsForkerWithSingleFork() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed <= 9 ? seed : nil
+        }
+        let forker = AllItemsForker<Int>()
+        let subscriber = ReduceFutureSubscriber(requestSize: 5, into: 7) { (result: inout Int, next: Int) in
+            result += next
+        }
+        
+        publisher ~~> forker
+            forker ~~> subscriber
+
+        forker.fork()
+        var result = subscriber.wait ?? -2
+        XCTAssertEqual(result, 52)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(forker._inputSubscription)
+        XCTAssertTrue(forker._inputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputSubscriptions.isEmpty)
+        XCTAssertNil(subscriber._inputSubscription.value)
+        
+        // Run 2nd time to check that cleanup after first run OK.
+        [publisher] ~~> forker ~~> [subscriber]
+
+        forker.fork()
+        result = subscriber.wait ?? -2
+        XCTAssertEqual(result, 52)
+    }
+    
+    func testAllItemsForkerWithDifferentProcessingSpeedsAndRequestSizes() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            seed += 1
+            return seed <= 9 ? seed : nil
+        }
+        let forker = AllItemsForker<Int>()
+        let slowSubscriber = ReduceFutureSubscriber(requestSize: 3, into: -3) { (result: inout Int, next: Int) in
+            Thread.sleep(forTimeInterval: 0.01) // Slow.
+            result += next
+        }
+        let fastSubscriber = ReduceFutureSubscriber(requestSize: 5, into: 7) { (result: inout Int, next: Int) in
+            result += next
+        }
+        
+        publisher ~~> forker
+            forker ~~> slowSubscriber
+            forker ~~> fastSubscriber
+        
+        forker.fork()
+        var slowResult = slowSubscriber.wait ?? -1
+        var fastResult = fastSubscriber.wait ?? -2
+        XCTAssertEqual(slowResult, 42)
+        XCTAssertEqual(fastResult, 52)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(forker._inputSubscription)
+        XCTAssertTrue(forker._inputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputSubscriptions.isEmpty)
+        XCTAssertNil(slowSubscriber._inputSubscription.value)
+        XCTAssertNil(fastSubscriber._inputSubscription.value)
+        
+        // Run 2nd time to check that cleanup after first run OK.
+        publisher ~~> forker ~~> [slowSubscriber, fastSubscriber]
+        
+        forker.fork()
+        slowResult = slowSubscriber.wait ?? -1
+        fastResult = fastSubscriber.wait ?? -2
+        XCTAssertEqual(slowResult, 42)
+        XCTAssertEqual(fastResult, 52)
+    }
+    
+    func testAllItemsForkerThatSubscribesAfterForking() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            Thread.sleep(forTimeInterval: 0.01) // Slow so that it won't have finished before 2nd attempted subscription.
+            seed += 1
+            return seed <= 9 ? seed : nil
+        }
+        let forker = AllItemsForker<Int>()
+        let subscriber = ReduceFutureSubscriber(requestSize: 5, into: 7) { (result: inout Int, next: Int) in
+            result += next
+        }
+        
+        publisher ~~> forker ~~> subscriber
+        forker.fork()
+        publisher ~~> forker
+        
+        let result = subscriber.wait ?? -2
+        XCTAssertEqual(result, -2)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(forker._inputSubscription)
+        XCTAssertTrue(forker._inputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputSubscriptions.isEmpty)
+        XCTAssertNil(subscriber._inputSubscription.value)
+        switch subscriber.status {
+        case .threw(let error):
+            switch error as! PublisherErrors {
+            case .existingSubscriptionTerminated(let reason):
+                XCTAssertEqual(reason, "Attempt to subscribe `Processor` to multiple `Publisher`s (multiple input error).")
+            default:
+                XCTFail("Should be `.existingSubscriptionTerminated`.")
+            }
+        default:
+            XCTFail("Should be `.threw`.")
+        }
+    }
+    
+    func testAllItemsForkerThatIsSubscribedToAfterForking() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            Thread.sleep(forTimeInterval: 0.01) // Slow so that it won't have finished before 2nd attempted subscription.
+            seed += 1
+            return seed <= 9 ? seed : nil
+        }
+        let forker = AllItemsForker<Int>()
+        let subscriber = ReduceFutureSubscriber(requestSize: 5, into: 7) { (result: inout Int, next: Int) in
+            result += next
+        }
+        
+        publisher ~~> forker ~~> subscriber
+        forker.fork()
+        forker ~~> subscriber
+        
+        let result = subscriber.wait ?? -2
+        XCTAssertEqual(result, -2)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(forker._inputSubscription)
+        XCTAssertTrue(forker._inputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputSubscriptions.isEmpty)
+        XCTAssertNil(subscriber._inputSubscription.value)
+        switch subscriber.status {
+        case .threw(let error):
+            switch error as! PublisherErrors {
+            case .existingSubscriptionTerminated(let reason):
+                XCTAssertEqual(reason, "Attempt to add another output subscriber once forked.")
+            default:
+                XCTFail("Should be `.existingSubscriptionTerminated`.")
+            }
+        default:
+            XCTFail("Should be `.threw`.")
+        }
+    }
+    
+    func testAllItemsForkerWhereOnSubscriberCancels() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            Thread.sleep(forTimeInterval: 0.01) // Slow so that it won't have finished before 2nd attempted subscription.
+            seed += 1
+            return seed <= 9 ? seed : nil
+        }
+        let forker = AllItemsForker<Int>()
+        let subscriber1 = ReduceFutureSubscriber(requestSize: 5, into: 7) { (result: inout Int, next: Int) in
+            result += next
+        }
+        let subscriber2 = ReduceFutureSubscriber(requestSize: 2, into: 0) { (result: inout Int, next: Int) in
+            result += next
+        }
+        
+        publisher ~~> forker ~~> [subscriber1, subscriber2]
+        forker.fork()
+        subscriber2.cancel()
+        
+        let result = subscriber1.wait ?? -2
+        XCTAssertEqual(result, -2)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(forker._inputSubscription)
+        XCTAssertTrue(forker._inputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputSubscriptions.isEmpty)
+        XCTAssertNil(subscriber1._inputSubscription.value)
+        switch subscriber1.status {
+        case .threw(let error):
+            switch error as! PublisherErrors {
+            case .existingSubscriptionTerminated(let reason):
+                XCTAssertEqual(reason, "Another output subscriber cancelled.")
+            default:
+                XCTFail("Should be `.existingSubscriptionTerminated`.")
+            }
+        default:
+            XCTFail("Should be `.threw`.")
+        }
+    }
+    
+    func testAllItemsForkerWhereSubscriberRequests0Items() {
+        let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
+            Thread.sleep(forTimeInterval: 0.01) // Slow so that it won't have finished before 2nd attempted subscription.
+            seed += 1
+            return seed <= 9 ? seed : nil
+        }
+        let forker = AllItemsForker<Int>()
+        let subscriber1 = ReduceFutureSubscriber(requestSize: 5, into: 7) { (result: inout Int, next: Int) in
+            result += next
+        }
+        let subscriber2 = ReduceFutureSubscriber(requestSize: 0, into: 0) { (result: inout Int, next: Int) in
+            result += next
+        }
+        
+        publisher ~~> forker ~~> [subscriber1, subscriber2]
+        
+        let result = subscriber1.wait ?? -2
+        XCTAssertEqual(result, -2)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(forker._inputSubscription)
+        XCTAssertTrue(forker._inputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputBuffer.isEmpty)
+        XCTAssertTrue(forker._outputSubscriptions.isEmpty)
+        XCTAssertNil(subscriber1._inputSubscription.value)
+        switch subscriber1.status {
+        case .threw(let error):
+            switch error as! PublisherErrors {
+            case .existingSubscriptionTerminated(let reason):
+                XCTAssertEqual(reason, "Another output subscriber cancelled.")
+            default:
+                XCTFail("Should be `.existingSubscriptionTerminated`.")
+            }
+        default:
+            XCTFail("Should be `.threw`.")
+        }
+    }
+    
     // MARK: Performance tests.
     
-    let performanceTestSize = 1_000_000_000
-
+//    let performanceTestSize = 1_000_000_000
+//
 //    func testPerformanceWithRequestSizeOf1() {
 //        self.measure {
 //            let publisher = IteratorSeededPublisher(initialSeed: 0) { (seed: inout Int) -> Int? in
@@ -171,8 +407,10 @@ class ReactiveCollectionTests: XCTestCase {
 //            let subscriber = ReduceFutureSubscriber(requestSize: 1, into: 2) { (result: inout Int, next: Int) in
 //                result += next
 //            }
-//            var result = -1
-//            publisher ~~> subscriber ~~>? result
+//
+//            publisher ~~> subscriber
+//
+//            subscriber.wait
 //        }
 //    }
 //
@@ -185,8 +423,10 @@ class ReactiveCollectionTests: XCTestCase {
 //            let subscriber = ReduceFutureSubscriber(requestSize: UInt64.max / 2, into: 2) { (result: inout Int, next: Int) in
 //                result += next
 //            }
-//            var result = -1
-//            publisher ~~> subscriber ~~>? result
+//
+//            publisher ~~> subscriber
+//
+//            subscriber.wait
 //        }
 //    }
     
@@ -200,9 +440,13 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> subscriber ~~>? result
-        XCTAssertEqual(3, result)
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
+        XCTAssertEqual(8, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testMoreThanUInt64MaxItemsRequested() {
@@ -215,8 +459,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(requestSize: UInt64.max / 2, into: 2) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = -1
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? -1
         XCTAssertEqual(-1, result)
         switch subscriber.status {
         case .threw(let error):
@@ -229,6 +475,10 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(processor._inputSubscription.value)
+        XCTAssertNil(processor._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testKeepProducingRequestSizeItemsAfterCancel() {
@@ -241,12 +491,15 @@ class ReactiveCollectionTests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.01) // Time delay to allow for cancel to happen.
             result += next
         }
+        
         publisher ~~> subscriber // Start production.
         subscriber.cancel() // Cancel production.
         publisher ~~> subscriber // Start production again.
-        var result = -1
-        subscriber ~~>? result // Wait for 2nd production to finish.
+        
+        let result = subscriber.wait ?? -1 // Wait for 2nd production to finish.
         XCTAssertGreaterThan(result, 9) // Result is > 9 because 1 from first production gets through!
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testRecievingOnCompleteBeforeSendingRequest() {
@@ -265,7 +518,7 @@ class ReactiveCollectionTests: XCTestCase {
         class DontRequest: SubscriberBase {
             typealias InputT = Int
             var isCompleted = false
-            func _consumeAndRequest(item: Int) throws {
+            func _handleInputAndRequest(item: Int) throws {
                 XCTFail("No items should be produced.")
             }
             var _inputSubscription = Atomic<Subscription?>(nil)
@@ -274,10 +527,12 @@ class ReactiveCollectionTests: XCTestCase {
             }
         }
         let subscriber = DontRequest()
+        
         publisher ~~> subscriber
+        
         XCTAssertTrue(subscriber.isCompleted)
-        XCTAssertNil(publisher._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(subscriber._inputSubscription.value, "Should not have a subscription.")
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testMapSubscribersError() {
@@ -291,15 +546,16 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 3) { (result: inout Int, _: Int) in
             throw FutureSubscriberErrors.tooManySubscriptions(number: testNumber) // Any old error!
         }
+        
         publisher ~~> processor ~~> subscriber
+        
         Thread.sleep(forTimeInterval: 0.01) // Allow time for error to propergate.
-        XCTAssertNil(publisher._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(processor._inputSubscription.value, "Should not have a subscription.")
-        XCTAssertNil(processor._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(subscriber._inputSubscription.value, "Should not have a subscription.")
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(processor._inputSubscription.value)
+        XCTAssertNil(processor._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
         let test = 4
-        var result = test
-        subscriber ~~>? result
+        let result = subscriber.wait ?? test
         XCTAssertEqual(test, result)
         switch subscriber.status {
         case .threw(let error):
@@ -323,15 +579,16 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 2) { (result: inout Int, _: Int) in
             result = 3
         }
+        
         publisher ~~> processor ~~> subscriber
+        
         subscriber.cancel()
-        XCTAssertNil(publisher._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(processor._inputSubscription.value, "Should not have a subscription.")
-        XCTAssertNil(processor._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(subscriber._inputSubscription.value, "Should not have a subscription.")
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(processor._inputSubscription.value)
+        XCTAssertNil(processor._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
         let test = 4
-        var result = test
-        subscriber ~~>? result
+        let result = subscriber.wait ?? test
         XCTAssertEqual(test, result)
         switch subscriber.status {
         case .threw(let error):
@@ -353,9 +610,11 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 1) { (result: inout Int, _: Int) in
             result = 2
         }
+        
+        processor ~~> subscriber
+        
         let test = 3
-        var result = test
-        processor ~~> subscriber ~~>? result
+        let result = subscriber.wait ?? test
         XCTAssertEqual(test, result)
         switch subscriber.status {
         case .threw(let error):
@@ -368,6 +627,9 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
+        XCTAssertNil(processor._inputSubscription.value)
+        XCTAssertNil(processor._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testMapHandleInputSubscriptionOnError() {
@@ -380,8 +642,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: 0) { (old: inout Int, new: Int) in
             old = new
         }
-        var result = 0
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? 0
         XCTAssertEqual(0, result)
         switch subscriber.status {
         case .threw(let error):
@@ -392,11 +656,15 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should have thrown.")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(processor._inputSubscription.value)
+        XCTAssertNil(processor._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testMapMultipleInputSubscriptionsErrorsWithOutputConnectedForErrorReporting() {
-        let publisher1 = ForEachPublisher(sequence: "Should fail!".characters)
-        let publisher2 = ForEachPublisher(sequence: "Should fail also!".characters)
+        let publisher1 = ForEachPublisher(sequence: "Should fail!")
+        let publisher2 = ForEachPublisher(sequence: "Should fail also!")
         let processor = MapSeededProcessor(initialSeed: ()) { (_: inout Void, next: Character) -> Character in
             Thread.sleep(forTimeInterval: 0.01) // Give time for 2nd input subscription to be tried.
             return next
@@ -404,29 +672,33 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, nextChar: Character) in
             result.append(nextChar) // Copy the string a character at a time.
         }
+        
         publisher1 ~~> processor ~~> subscriber // First subscription and start processing.
         publisher2 ~~> processor // Should fail and terminate above line.
-        XCTAssertNil(publisher1._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(publisher2._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(processor._inputSubscription.value, "Should not have a subscription.")
-        XCTAssertNil(processor._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(subscriber._inputSubscription.value, "Should not have a subscription.")
+        
+        XCTAssertNil(publisher1._outputSubscriber.value)
+        XCTAssertNil(publisher2._outputSubscriber.value)
+        XCTAssertNil(processor._inputSubscription.value)
+        XCTAssertNil(processor._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
         let test = "Failed!"
-        var result = test
-        subscriber ~~>? result
+        let result = subscriber.wait ?? test
         XCTAssertEqual(test, result)
     }
     
     func testMapMultipleInputSubscriptionsErrorsWithoutOutput() {
-        let publisher1 = ForEachPublisher(sequence: "Should fail!".characters)
-        let publisher2 = ForEachPublisher(sequence: "Should fail also!".characters)
+        let publisher1 = ForEachPublisher(sequence: "Should fail!")
+        let publisher2 = ForEachPublisher(sequence: "Should fail also!")
         let processor = MapSeededProcessor(initialSeed: ()) { (_: inout Void, next: Character) -> Character in
             return next
         }
-        [publisher1, publisher2] ~~> processor // First subscription OK, 2nd should fail and cancel 1st.
-        XCTAssertNil(publisher1._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(publisher2._outputSubscriber.value, "Should not be subscribed to.")
-        XCTAssertNil(processor._inputSubscription.value, "Should not have a subscription.")
+        
+        publisher1 ~~> processor // First subscription OK.
+        publisher2 ~~> processor // 2nd should fail and cancel 1st.
+        
+        XCTAssertNil(publisher1._outputSubscriber.value)
+        XCTAssertNil(publisher2._outputSubscriber.value)
+        XCTAssertNil(processor._inputSubscription.value)
     }
     
     func testPublisherBaseNextError() {
@@ -436,8 +708,10 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, nextChar: Character) in
             result.append(nextChar) // Copy the string a character at a time.
         }
-        var result = "Failed!"
-        publisher ~~> subscriber ~~>? result
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual("Failed!", result)
         switch subscriber.status {
         case .threw(let error):
@@ -445,18 +719,22 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
-    }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
+   }
     
     func testSubscriberBaseConsumerError() {
-        let publisher = ForEachPublisher(sequence: "Hello, world!".characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: "Hello, world!") // String to be copied character wise.
         class FailedToConsume: FutureSubscriberClassBase<Character, String> {
-            override func _consume(item: Character) throws {
+            override func _handleInput(item: Character) throws {
                 throw FutureSubscriberErrors.tooManySubscriptions(number: 0) // Any old error!
             }
         }
         let subscriber = FailedToConsume()
-        var result = "Failed!"
-        publisher ~~> subscriber ~~>? result
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual("Failed!", result)
         switch subscriber.status {
         case .threw(let error):
@@ -464,7 +742,9 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
-    }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
+   }
     
     func testFailedSubscriptionInstance() {
         class FailedSubscriptionPublisher: PublisherBase {
@@ -479,11 +759,11 @@ class ReactiveCollectionTests: XCTestCase {
                 return FailedSubscriptionPublisher.errorMessage
             }
         }
-        let failedPublisher = FailedSubscriptionPublisher()
+        let publisher = FailedSubscriptionPublisher()
         class FailedSubscriptionSubscriber: SubscriberBase {
             typealias InputT = Character
             let _inputSubscription = Atomic<Subscription?>(nil)
-            func _consumeAndRequest(item _: Character) throws {
+            func _handleInputAndRequest(item _: Character) throws {
                 XCTFail("Should never be called via `Subscription.on(next:)`.")
             }
             func _handleAndRequestFrom(newInputSubscription: Subscription) {
@@ -504,21 +784,27 @@ class ReactiveCollectionTests: XCTestCase {
                 }
             }
         }
-        let failedSubscriber = FailedSubscriptionSubscriber()
-        failedPublisher ~~> failedSubscriber
+        let subscriber = FailedSubscriptionSubscriber()
+        
+        publisher ~~> subscriber
+        
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testCopyingProducerFreesResources() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let processor = MapSeededProcessor(initialSeed: ()) { (_: inout Void, next: Character) in
             next
         }
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, nextChar: Character) in
             result.append(nextChar) // Copy the string a character at a time.
         }
-        var result = "Failed!"
-        publisher ~~> processor ~~> subscriber ~~>? result
+        
+        publisher ~~> processor ~~> subscriber
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual(test, result)
         XCTAssertNil(publisher._outputSubscriber.value, "Publisher's output subscriber should have been freed.")
         XCTAssertNil(processor._outputSubscriber.value, "Processor's output subscriber should have been freed.")
@@ -528,16 +814,22 @@ class ReactiveCollectionTests: XCTestCase {
     
     func testSubscribeCompleteSubscribeAndCompleteAgain() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, nextChar: Character) in
             result.append(nextChar) // Copy the string a character at a time.
         }
-        var result = "Failed!"
-        publisher ~~> subscriber ~~>? result
+        
+        publisher ~~> subscriber
+        
+        var result = subscriber.wait ?? "Failed!"
         XCTAssertEqual(test, result)
-        result = "Failed!"
-        publisher ~~> subscriber ~~>? result // Should work again once finished 1st time.
+        
+        publisher ~~> subscriber // Should work again once finished 1st time.
+        
+        result = subscriber.wait ?? "Failed!"
         XCTAssertEqual(test, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testSubscribingToMultiplePublishersRejects1stAnd2ndSubscriptions() {
@@ -545,6 +837,7 @@ class ReactiveCollectionTests: XCTestCase {
             var count: Int
             init(_ initialCount: Int) {
                 count = initialCount
+                super.init(queue: .global())
             }
             override func _next() -> Int? {
                 Thread.sleep(forTimeInterval: 0.005) // Allow time for 2nd subscription to happen.
@@ -552,17 +845,21 @@ class ReactiveCollectionTests: XCTestCase {
                 return count < 8 ? count : nil
             }
         }
-        let publisher = SlowCounter(-1)
+        let publisher1 = SlowCounter(-1)
         let publisher2 = SlowCounter(9)
         let subscriber = ReduceFutureSubscriber(into: 0) { (result: inout Int, next: Int) in
             result += next
         }
         let test = -10
-        var result = test
-        publisher ~~> subscriber
+        
+        publisher1 ~~> subscriber
         publisher2 ~~> subscriber // Should be rejected by subscriber and 1st subscription cancelled.
-        subscriber ~~>? result // Should fail.
+        
+        let result = subscriber.wait ?? test // Should fail.
         XCTAssertEqual(test, result)
+        XCTAssertNil(publisher1._outputSubscriber.value)
+        XCTAssertNil(publisher2._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testPublishers2ndSubscriptionAndCompleting1st() {
@@ -570,6 +867,7 @@ class ReactiveCollectionTests: XCTestCase {
             var count: Int
             init(_ initialCount: Int) {
                 count = initialCount
+                super.init(queue: .global())
             }
             override func _next() -> Int? {
                 Thread.sleep(forTimeInterval: 0.005) // Allow time for 2nd subscription to happen.
@@ -586,13 +884,17 @@ class ReactiveCollectionTests: XCTestCase {
         }
         let testOK = 28
         let testFail = 100
-        var result = testFail
+        
         publisher ~~> subscriberPlus // Should continue to work.
         publisher ~~> subscriberMinus // Should be rejected.
-        subscriberMinus ~~>? result // Should fail.
+        
+        var result = subscriberMinus.wait ?? testFail // Should fail.
         XCTAssertEqual(testFail, result)
-        subscriberPlus ~~>? result // Should be OK.
+        result = subscriberPlus.wait ?? testFail // Should be OK.
         XCTAssertEqual(testOK, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriberPlus._inputSubscription.value)
+        XCTAssertNil(subscriberMinus._inputSubscription.value)
     }
     
     func testIteratorPublisherRejecting2ndSubscription() {
@@ -604,17 +906,18 @@ class ReactiveCollectionTests: XCTestCase {
                 return count < 8 ? count : nil
             }
         }
-        let publisher = Test()
+        let publisher = Test(queue: .global())
         let subscriber1 = ReduceFutureSubscriber(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
             result += next
         }
         let subscriber2 = ReduceFutureSubscriber(into: 0) { (_: inout Int, _: Int) in
             XCTFail("Should never become subscribed.")
         }
+        
         publisher ~~> subscriber1
         publisher ~~> subscriber2 // Should fail.
-        var result = 0
-        subscriber1 ~~>! result
+        
+        let result = subscriber1.wait ?? 0
         XCTAssertEqual(28, result)
         switch subscriber2.status {
         case .threw(let error):
@@ -627,6 +930,9 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be an error")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber1._inputSubscription.value)
+        XCTAssertNil(subscriber2._inputSubscription.value)
     }
     
     func testIteratorPublisherDefaultReset() {
@@ -637,30 +943,38 @@ class ReactiveCollectionTests: XCTestCase {
                 return count < 8 ? count : nil
             }
         }
-        let publisher = Test()
+        let publisher = Test(queue: .global())
         let subscriber = ReduceFutureSubscriber(timeout: .milliseconds(50), into: 0) { (result: inout Int, next: Int) in
             result += next
         }
-        var result = 0
-        publisher ~~> subscriber ~~>! result
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? 0
         XCTAssertEqual(28, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionDoubleSubscription() {
         let test = "Hello, world!"
-        let publisher1 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
-        let publisher2 = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher1 = ForEachPublisher(sequence: test) // String to be copied character wise.
+        let publisher2 = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(requestSize: 1, into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.01) // Allow time for 2nd subscription.
         }
+        
         publisher1 ~~> subscriber // Should succeed.
+        
         switch subscriber.status {
         case .running:
             break
         default:
             XCTFail("Should be running.")
         }
+        
         publisher2 ~~> subscriber // Should fail.
+        
         switch subscriber.status {
         case .threw(let error):
             switch error as! FutureSubscriberErrors {
@@ -670,17 +984,24 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should have thrown.")
         }
+        XCTAssertNil(publisher1._outputSubscriber.value)
+        XCTAssertNil(publisher2._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionRequests() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(requestSize: 1, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
-        var result = "Failed!"
-        publisher ~~> subscriber ~~>? result
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual(test, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testOneIterationSequenceWithRequestAndFinishAtRequestBoundary() {
@@ -697,9 +1018,13 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(requestSize: 4, into: "") { (result: inout String, next: Int) in
             result.append(next.description)
         }
-        var result = "Failed!"
-        publisher ~~> subscriber ~~>? result
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual("01234567", result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testOneIterationSequenceWithFinishAtRequest() {
@@ -716,30 +1041,39 @@ class ReactiveCollectionTests: XCTestCase {
         let subscriber = ReduceFutureSubscriber(requestSize: 9, into: "") { (result: inout String, next: Int) in
             result.append(next.description)
         }
-        var result = "Failed!"
-        publisher ~~> subscriber ~~>? result
+        
+        publisher ~~> subscriber
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual("01234567", result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionFails() {
         let test = "Hello, world!"
         let error = "Failed!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(into: "") { (_: inout String, _: Character) in
             throw FutureSubscriberErrors.tooManySubscriptions(number: 0) // Fail by throwing (in example any old error!).
         }
+        
         publisher ~~> subscriber
-        let result = subscriber.get ?? error
+        
+        let result = subscriber.wait ?? error
         XCTAssertEqual(error, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionCancel() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Allow time for cancel.
         }
         publisher ~~> subscriber
+        
         subscriber.cancel()
         switch subscriber.status {
         case .threw(let error):
@@ -752,16 +1086,20 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
-    }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
+   }
     
     func testReductionTimesOutNs() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(timeout: .nanoseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
+        
         publisher ~~> subscriber
-        let _ = subscriber.get
+        
+        let _ = subscriber.wait
         switch subscriber.status {
         case .threw(let error):
             switch error as! TerminateFuture {
@@ -773,16 +1111,20 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`.")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionTimesOutUs() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(timeout: .microseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
+        
         publisher ~~> subscriber
-        let _ = subscriber.get
+        
+        let _ = subscriber.wait
         switch subscriber.status {
         case .threw(let error):
             switch error as! TerminateFuture {
@@ -794,16 +1136,20 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`")
         }
-    }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
+   }
     
     func testReductionTimesOutMs() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(timeout: .milliseconds(100), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
+        
         publisher ~~> subscriber
-        let _ = subscriber.get
+        
+        let _ = subscriber.wait
         switch subscriber.status {
         case .threw(let error):
             switch error as! TerminateFuture {
@@ -815,16 +1161,20 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionTimesOutS() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(timeout: .milliseconds(50), into: "") { (_: inout String, _: Character) in
             Thread.sleep(forTimeInterval: 0.1) // Cause a timeout.
         }
+        
         publisher ~~> subscriber
-        let _ = subscriber.get
+        
+        let _ = subscriber.wait
         switch subscriber.status {
         case .threw(let error):
             switch error as! TerminateFuture {
@@ -836,27 +1186,35 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     // Have to test that this doesn't occur!
     func testReductionTimesOutNever() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(timeout: .never, into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy the string a character at a time.
         }
+        
         publisher ~~> subscriber
-        XCTAssertEqual(test, subscriber.get ?? "Failed!")
+        
+        XCTAssertEqual(test, subscriber.wait ?? "Failed!")
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionCancelIgnoredAfterCompletion() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, next: Character) in
             result.append(next) // Copy string a character at a time.
         }
+        
         publisher ~~> subscriber
-        let _ = subscriber.get // Wait for completion.
+        
+        let _ = subscriber.wait // Wait for completion.
         subscriber.cancel() // Should ignore cancel after completion.
         switch subscriber.status {
         case .completed(let result):
@@ -864,16 +1222,20 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should have completed.")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testReductionStatus() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(into: "") { (_: inout String, _: Character) in
             throw FutureSubscriberErrors.tooManySubscriptions(number: 0) // Fail by throwing (in example any old error!).
         }
+        
         publisher ~~> subscriber
-        let _ = subscriber.get
+        
+        let _ = subscriber.wait
         switch subscriber.status {
         case .threw(let error):
             switch error as! FutureSubscriberErrors {
@@ -883,23 +1245,29 @@ class ReactiveCollectionTests: XCTestCase {
         default:
             XCTFail("Should be `.threw`")
         }
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testSubscribeInAnySubscriber() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         let subscriber = ReduceFutureSubscriber(into: "") { (result: inout String, character: Character) in
             result.append(character) // Copy the string a character at a time.
         }
         let anySubscriber = AnySubscriber(subscriber) // Wrap in an AnySubscriber (to test AnySubscriber).
+        
         publisher ~~> anySubscriber
-        let result = subscriber.get ?? "Failed!"
+        
+        let result = subscriber.wait ?? "Failed!"
         XCTAssertEqual(test, result)
+        XCTAssertNil(publisher._outputSubscriber.value)
+        XCTAssertNil(subscriber._inputSubscription.value)
     }
     
     func testRequest0Items() {
         let test = "Hello, world!"
-        let publisher = ForEachPublisher(sequence: test.characters) // String to be copied character wise.
+        let publisher = ForEachPublisher(sequence: test) // String to be copied character wise.
         class N0Subscriber: Subscriber {
             func onComplete() {
                 XCTFail("Should not be called")
@@ -918,8 +1286,11 @@ class ReactiveCollectionTests: XCTestCase {
             }
         }
         let subscriber = N0Subscriber()
+        
         publisher ~~> subscriber
         publisher ~~> subscriber // Can subscribe 2nd time since 1st subscription cancelled
+        
+        XCTAssertNil(publisher._outputSubscriber.value)
     }
     
     // MARK: Templates (in case needed in future).
